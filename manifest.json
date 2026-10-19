@@ -1,0 +1,41 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Passimoritz/hostwerk-public/main/sdk/manifest.schema.json",
+  "id": "passwords",
+  "name": {
+    "de": "Passwort-Manager",
+    "en": "Password manager"
+  },
+  "description": {
+    "de": "Eigener verschlüsselter Tresor oder Bitwarden/Vaultwarden, 1Password, KeePass, pass und LastPass – mit Browser-Erweiterung, Sicherheitsprüfung (Have I Been Pwned), 2FA-Codes, Generator, Teilen mit Mitgliedern und Import aus allen gängigen Diensten.",
+    "en": "Own encrypted vault or Bitwarden/Vaultwarden, 1Password, KeePass, pass and LastPass – with browser extension, security check (Have I Been Pwned), 2FA codes, generator, sharing with members and import from every common service."
+  },
+  "version": "1.0.0",
+  "author": "Hostwerk",
+  "homepage": "https://github.com/Passimoritz/hostwerk-ext-passwords",
+  "license": "MIT",
+  "icon": "icon.svg",
+  "banner": "banner.svg",
+  "color": "#7c3aed",
+  "category": "security",
+  "hostwerk": ">=2.9.0",
+  "permissions": [
+    "native"
+  ],
+  "page": {
+    "title": {
+      "de": "Passwörter",
+      "en": "Passwords"
+    },
+    "description": {
+      "de": "Tresore, Browser-Erweiterung, Sicherheitsprüfung.",
+      "en": "Vaults, browser extension, security check."
+    },
+    "icon": "key"
+  },
+  "backend": "server/index.js",
+  "ui": "ui/index.js",
+  "screenshots": [
+    "docs/screenshot.png",
+    "docs/screenshot.de.png"
+  ]
+}

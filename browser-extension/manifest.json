@@ -1,0 +1,72 @@
+{
+  "manifest_version": 3,
+  "name": "Hostwerk Passwörter",
+  "description": "Passwörter aus deinem Hostwerk: Vorschläge im Anmeldefeld, ausfüllen, speichern. Spricht nur mit Hostwerk auf diesem PC.",
+  "version": "1.4.0",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "tabs",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Hostwerk Passwörter",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png"
+    }
+  },
+  "commands": {
+    "fill-first": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Ersten passenden Zugang ausfüllen"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "passwoerter@hostwerk.local",
+      "strict_min_version": "121.0",
+      "update_url": "https://raw.githubusercontent.com/Passimoritz/hostwerk-public/main/browser-extension/updates.json",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "homepage_url": "https://github.com/Passimoritz/hostwerk-public"
+}

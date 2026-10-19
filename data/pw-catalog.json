@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "updated": "2026-10-17",
+  "note": "Katalog des Passwort-Managers. Wird täglich aus dem öffentlichen Hostwerk-Repository geladen (Rückfall: diese Datei). providers = alle bekannten Dienste mit Einbindungsweg, formats = zusätzliche Import-Formate (Kopfzeilen → Felder), clis = Download-Adressen der Kommandozeilen-Programme.",
+  "providers": [
+    { "id": "hostwerk", "name": "Hostwerk-Tresor", "way": "native", "text": "Eingebaut, verschlüsselte Datei auf diesem PC (AES-256, scrypt). Mit Browser-Erweiterung, Sicherheitsprüfung, TOTP, Verlauf.", "url": null },
+    { "id": "bitwarden", "name": "Bitwarden", "way": "native", "text": "Konto bei bitwarden.com oder selbst gehostet. Anbindung über das offizielle CLI „bw“.", "url": "https://bitwarden.com", "import": "bitwarden-json" },
+    { "id": "vaultwarden", "name": "Vaultwarden (selbst gehostet)", "way": "native", "text": "Bitwarden-kompatibler Server – läuft als Docker-Container direkt in Hostwerk (Vorlage „Vaultwarden“). Anbindung wie Bitwarden mit eigener Server-Adresse.", "url": "https://github.com/dani-garcia/vaultwarden", "docker": "vaultwarden/server", "provider": "bitwarden" },
+    { "id": "onepassword", "name": "1Password", "way": "native", "text": "Über das offizielle CLI „op“ mit Service-Account-Token (Business/Teams/Familien mit Entwickler-Werkzeugen). Persönliche Konten: Export als CSV/1PUX importieren.", "url": "https://1password.com", "import": "1password-csv" },
+    { "id": "keepass", "name": "KeePass / KeePassXC / KeePassDX", "way": "native", "text": ".kdbx-Datei direkt lesen und schreiben – auch auf einem Netzlaufwerk oder in einem Sync-Ordner.", "url": "https://keepassxc.org", "import": "keepass-csv" },
+    { "id": "pass", "name": "pass (passwordstore.org)", "way": "native", "text": "GPG-Passwortspeicher unter Linux/macOS.", "url": "https://www.passwordstore.org", "linux": true },
+    { "id": "lastpass", "name": "LastPass", "way": "native-readonly", "text": "Lesen/Exportieren über lastpass-cli; verwalten im Hostwerk-Tresor.", "url": "https://lastpass.com", "import": "lastpass" },
+    { "id": "google", "name": "Google Passwort-Manager (Chrome/Android)", "way": "import", "text": "Keine Schnittstelle für Programme. Export: passwords.google.com → Einstellungen → Passwörter exportieren (CSV). Zurück: Chrome → Passwörter → Importieren (CSV-Export aus Hostwerk).", "url": "https://passwords.google.com", "import": "chrome", "export": "chrome" },
+    { "id": "apple", "name": "Apple Passwörter / iCloud-Schlüsselbund", "way": "import", "text": "Export: App „Passwörter“ (macOS) → Datei → Alle Passwörter exportieren (CSV). Import dort ebenfalls per CSV.", "url": "https://support.apple.com/de-de/105115", "import": "apple", "export": "chrome" },
+    { "id": "edge", "name": "Microsoft Edge", "way": "import", "text": "Export: edge://settings/passwords → Passwörter exportieren (CSV).", "url": "https://www.microsoft.com/edge", "import": "edge", "export": "chrome" },
+    { "id": "firefox", "name": "Firefox", "way": "import", "text": "Export: about:logins → ⋯ → Zugangsdaten exportieren (CSV).", "url": "https://www.mozilla.org/firefox", "import": "firefox", "export": "chrome" },
+    { "id": "protonpass", "name": "Proton Pass", "way": "import", "text": "Export: Proton Pass → Einstellungen → Exportieren (CSV oder JSON, unverschlüsselt).", "url": "https://proton.me/pass", "import": "protonpass" },
+    { "id": "dashlane", "name": "Dashlane", "way": "import", "text": "Export: Dashlane-App → Einstellungen → Daten exportieren (CSV).", "url": "https://www.dashlane.com", "import": "dashlane" },
+    { "id": "nordpass", "name": "NordPass", "way": "import", "text": "Export: NordPass → Einstellungen → Elemente exportieren (CSV).", "url": "https://nordpass.com", "import": "nordpass" },
+    { "id": "enpass", "name": "Enpass", "way": "import", "text": "Export: Enpass → Datei → Exportieren → CSV.", "url": "https://www.enpass.io", "import": "enpass" },
+    { "id": "keeper", "name": "Keeper", "way": "import", "text": "Export: Keeper Web Vault → Einstellungen → Exportieren (CSV).", "url": "https://www.keepersecurity.com", "import": "keeper" },
+    { "id": "roboform", "name": "RoboForm", "way": "import", "text": "Export: RoboForm → Optionen → Konto & Daten → Exportieren (CSV).", "url": "https://www.roboform.com", "import": "roboform" },
+    { "id": "zoho", "name": "Zoho Vault", "way": "import", "text": "Export: Zoho Vault → Werkzeuge → Exportieren (CSV).", "url": "https://www.zoho.com/vault/", "import": "zoho" },
+    { "id": "kaspersky", "name": "Kaspersky Password Manager", "way": "import", "text": "Export: Einstellungen → Import/Export → CSV.", "url": "https://www.kaspersky.de/password-manager", "import": "kaspersky" },
+    { "id": "samsung", "name": "Samsung Pass", "way": "manual", "text": "Keine Export-Funktion. Zugänge von Hand übertragen oder über Chrome/Google synchronisieren und dort exportieren.", "url": "https://www.samsung.com/de/apps/samsung-pass/" },
+    { "id": "psono", "name": "Psono", "way": "import", "text": "Export: Psono → Andere → Exportieren (CSV/JSON).", "url": "https://psono.com", "import": "generic" },
+    { "id": "passbolt", "name": "Passbolt", "way": "import", "text": "Export: Passbolt → Exportieren (CSV im KeePass- oder LastPass-Format).", "url": "https://www.passbolt.com", "import": "keepass-csv" }
+  ],
+  "formats": [],
+  "clis": {
+    "opCheck": "https://app-updates.agilebits.com/check/1/0/CLI2/en/2.0.0/N",
+    "opBase": "https://cache.agilebits.com/dist/1P/op2/pkg",
+    "bwReleases": "https://api.github.com/repos/bitwarden/clients/releases"
+  }
+}

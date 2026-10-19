@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Hostwerk Passwörter</title>
+<style>
+:root { color-scheme: light dark; --bg: #fff; --tx: #14181d; --mu: #5c636b; --ln: #e4e1dc; --ac: #ff5a1f; --ac2: #7c5cff; --card: #f6f5f3; --ok: #23864f; --bad: #c8361e; --ring: rgba(255, 90, 31, .35); }
+@media (prefers-color-scheme: dark) { :root { --bg: #14171c; --tx: #eceae6; --mu: #9aa1a9; --ln: #2a3037; --card: #1c2127; --ok: #3fb97a; --bad: #ef6a52; } }
+* { box-sizing: border-box; }
+body { margin: 0; width: 360px; min-height: 120px; font: 13px/1.45 system-ui, "Segoe UI", sans-serif; background: var(--bg); color: var(--tx); }
+svg { flex: none; }
+.head { display: flex; align-items: center; gap: 9px; padding: 11px 12px; border-bottom: 1px solid var(--ln); }
+.logo { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, var(--ac), var(--ac2)); }
+.head .t { flex: 1; min-width: 0; }
+.head b { display: block; font-size: 14px; }
+.head small { display: flex; align-items: center; gap: 5px; color: var(--mu); font-size: 11.5px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 currentColor; }
+.dot.off { background: var(--bad); }
+.dot.busy { background: var(--ac); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.wrap { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+input, button, select { font: inherit; }
+input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--ln); border-radius: 9px; background: var(--bg); color: var(--tx); transition: border-color .15s, box-shadow .15s; }
+input:focus, select:focus { outline: none; border-color: var(--ac); box-shadow: 0 0 0 3px var(--ring); }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 11px; border-radius: 9px; border: 1px solid var(--ln); background: var(--card); color: var(--tx); cursor: pointer; transition: transform .08s, background .15s, border-color .15s; }
+button:hover { border-color: var(--ac); }
+button:active { transform: scale(.97); }
+button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+button.p { background: var(--ac); color: #fff; border-color: var(--ac); }
+button.s { padding: 5px 9px; font-size: 12px; }
+button.ic { padding: 6px; }
+button[disabled] { opacity: .55; cursor: default; }
+.row { display: flex; gap: 6px; align-items: center; }
+.mu { color: var(--mu); font-size: 12px; }
+.msg { color: var(--bad); font-size: 12px; min-height: 0; }
+.msg:empty { display: none; }
+.hid { display: none !important; }
+.fade { animation: fade .22s ease-out; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } }
+.shake { animation: shake .35s; }
+@keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
+.spin { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Gesperrt: großes Schloss, das beim Entsperren aufspringt */
+.lock { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 6px 0 2px; text-align: center; }
+.lock .shackle { transition: transform .35s cubic-bezier(.3, 1.6, .5, 1); transform-origin: 30px 22px; }
+.lock.open .shackle { transform: translateY(-5px) rotate(-28deg); }
+.lock .body { fill: var(--card); stroke: var(--ac); }
+.unlockForm { display: flex; flex-direction: column; gap: 8px; }
+
+.tabs { display: flex; gap: 2px; padding: 3px; background: var(--card); border-radius: 10px; position: relative; }
+.tabs button { flex: 1; border: 0; background: none; padding: 6px; font-size: 12.5px; color: var(--mu); z-index: 1; }
+.tabs button.on { color: var(--tx); font-weight: 600; }
+.tabs .pill { position: absolute; top: 3px; bottom: 3px; border-radius: 8px; background: var(--bg); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); transition: left .2s, width .2s; }
+
+.list { display: flex; flex-direction: column; gap: 6px; }
+.item { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border: 1px solid var(--ln); border-radius: 10px; animation: fade .2s ease-out both; }
+.item:hover { border-color: var(--ac); }
+.av { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; color: #fff; flex: none; }
+.item .n { flex: 1; min-width: 0; }
+.item .n b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .n span { color: var(--mu); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 6px; color: var(--mu); font-size: 12px; text-align: center; }
+.save { background: var(--card); border: 1px solid var(--ac); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 7px; }
+.gen { font-family: ui-monospace, Consolas, monospace; word-break: break-all; padding: 10px; border-radius: 9px; background: var(--card); min-height: 40px; }
+.meter { height: 4px; border-radius: 3px; background: var(--ln); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+.foot { display: flex; align-items: center; gap: 6px; padding: 9px 12px; border-top: 1px solid var(--ln); color: var(--mu); font-size: 11.5px; }
+.foot span { flex: 1; }
+.foot a { color: var(--mu); }
+kbd { font: 11px ui-monospace, Consolas, monospace; padding: 1px 4px; border: 1px solid var(--ln); border-radius: 4px; }
+
+/* Koppeln: drei Schritte mit Verbindungs-Animation */
+.pairArt { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 6px 0; }
+.pairArt .wire { width: 70px; height: 2px; background: repeating-linear-gradient(90deg, var(--ac) 0 6px, transparent 6px 12px); background-size: 24px 2px; animation: flow 1s linear infinite; }
+@keyframes flow { to { background-position: 24px 0; } }
+.pairArt.ok .wire { background: var(--ok); animation: none; }
+.tile { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--card); border: 1px solid var(--ln); }
+details summary { cursor: pointer; color: var(--mu); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="head">
+  <div class="logo" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 9.2-9.2M17 6l3 3M14 9l2 2"/></svg></div>
+  <div class="t"><b>Hostwerk Passwörter</b><small><span class="dot busy" id="dot"></span><span id="state">Verbinde …</span></small></div>
+  <button class="ic hid" id="lockBtn" title="Alle Tresore sperren" aria-label="Alle Tresore sperren"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></button>
+</div>
+
+<div class="wrap hid" id="pairView">
+  <div class="pairArt" id="pairArt" aria-hidden="true">
+    <div class="tile"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
+    <div class="wire"></div>
+    <div class="tile" style="color:var(--ac)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div>
+  </div>
+  <div class="mu" id="pairHint">Hostwerk sucht dich gerade selbst – öffne in Hostwerk <b>Passwörter → Browser</b> und klicke bei diesem Browser auf „Installieren“. Die Kopplung passiert dann von allein.</div>
+  <details>
+    <summary>Lieber mit Code koppeln</summary>
+    <div class="wrap" style="padding:8px 0 0">
+      <div class="row"><input id="port" placeholder="Port" value="7780" style="width:90px" aria-label="Port von Hostwerk"><input id="code" placeholder="6-stelliger Code" maxlength="6" inputmode="numeric" aria-label="Kopplungscode"></div>
+      <input id="pname" placeholder="Name dieses Browsers (z. B. Chrome Laptop)" aria-label="Name dieses Browsers">
+      <button class="p" id="pairBtn">Koppeln</button>
+    </div>
+  </details>
+  <div class="msg" id="pairMsg"></div>
+</div>
+
+<div class="wrap hid" id="offlineView">
+  <div class="empty"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5.1A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.8M19 12.9a10 10 0 0 0-2.4-1.6M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></svg><b style="color:var(--tx)">Hostwerk antwortet nicht</b><span id="offlineText">Läuft Hostwerk auf diesem PC?</span></div>
+  <button id="retryBtn">Erneut versuchen</button>
+</div>
+
+<div class="wrap hid" id="lockedView">
+  <div class="lock" id="lockArt">
+    <svg width="60" height="64" viewBox="0 0 60 64" aria-hidden="true"><path class="shackle" d="M18 30V20a12 12 0 0 1 24 0v10" fill="none" stroke="var(--ac)" stroke-width="5" stroke-linecap="round"/><rect class="body" x="9" y="28" width="42" height="32" rx="8" stroke-width="3"/><circle cx="30" cy="42" r="4" fill="var(--ac)"/><path d="M30 45v6" stroke="var(--ac)" stroke-width="3" stroke-linecap="round"/></svg>
+    <b id="lockedTitle">Tresor gesperrt</b>
+  </div>
+  <form class="unlockForm" id="unlockForm">
+    <select id="vaultSel" class="hid" aria-label="Tresor"></select>
+    <input id="unlockPw" type="password" placeholder="Master-Passwort" autocomplete="current-password" aria-label="Master-Passwort">
+    <button class="p" id="unlockBtn" type="submit"><span id="unlockLbl">Entsperren</span></button>
+  </form>
+  <div class="msg" id="unlockMsg"></div>
+</div>
+
+<div class="wrap hid" id="mainView">
+  <div class="save hid" id="saveBox"><b>Zugang speichern?</b><div class="mu" id="saveText"></div><div class="row"><button class="p s" id="saveYes">Speichern</button><button class="s" id="saveNo">Nein</button></div></div>
+  <button class="s hid" id="moreLocked" style="justify-content:flex-start"></button>
+  <div class="tabs" id="tabs"><span class="pill" id="pill"></span><button class="on" id="tabMatch">Diese Seite</button><button id="tabSearch">Suchen</button><button id="tabGen">Erzeugen</button></div>
+  <div id="viewMatch"><div class="list" id="matches"></div><div class="empty hid" id="matchEmpty"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span id="matchEmptyText">Keine Zugänge für diese Seite.</span></div></div>
+  <div class="hid" id="viewSearch"><input id="q" placeholder="Name, Benutzer, Adresse …" aria-label="Suchen"><div class="list" id="results" style="margin-top:8px"></div></div>
+  <div class="hid" id="viewGen" style="display:flex;flex-direction:column;gap:8px">
+    <div class="gen" id="genOut">–</div><div class="meter"><i id="genMeter"></i></div>
+    <div class="row"><label class="mu" style="flex:1">Länge <input id="genLen" type="range" value="20" min="8" max="64" style="width:120px;vertical-align:middle;padding:0"> <b id="genLenV">20</b></label><label class="mu"><input type="checkbox" id="genSym" checked style="width:auto"> Sonderzeichen</label></div>
+    <div class="row"><button class="p s" id="genBtn">Neu</button><button class="s" id="genCopy">Kopieren</button><button class="s" id="genFill">Ins Passwortfeld</button></div>
+  </div>
+</div>
+
+<div class="foot hid" id="foot"><span><kbd>Strg</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> füllt aus</span><a href="#" id="unpair">Kopplung lösen</a></div>
+<div class="wrap hid" id="unpairConfirm"><b>Kopplung mit Hostwerk lösen?</b><div class="mu">Der Browser wird auch in Hostwerk ausgetragen. Neu koppeln geht jederzeit über Passwörter → Browser.</div><div class="row"><button class="p s" id="unpairYes">Lösen</button><button class="s" id="unpairNo">Abbrechen</button></div></div>
+<script src="popup.js"></script>
+</body>
+</html>
