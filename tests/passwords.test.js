@@ -87,6 +87,8 @@ test('manager: vaults, items, security check, import, data in settings.passwords
   const { pm, S } = manager();
   const v = await pm.create({ type: 'hostwerk', name: 'Home', password: 'master-pw-123' });
   assert.strictEqual(S.passwords.defaultId, v.id);
+  assert.strictEqual(pm.generate({ length: 16 }).length, 16, 'generator for Hostwerk (AI tool pw_generate)');
+  assert.ok(pm.strength('password123').score <= 1);
   await pm.addItem(v.id, { type: 'login', name: 'A', username: 'x', password: 'password123', urls: ['https://github.com'] });
   await pm.addItem(v.id, { type: 'login', name: 'B', username: 'y', password: 'password123' });
   const r = await pm.audit(v.id, { hibp: false });

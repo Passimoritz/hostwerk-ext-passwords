@@ -66,6 +66,9 @@ class PasswordManager {
     if (!process.env.HW_TEST) this.timers.push(setInterval(() => this.loadCatalog({ online: true }).catch(() => {}), 24 * 3600000));
     for (const t of this.timers) if (t.unref) t.unref();
   }
+  /** Password generator and rating for Hostwerk (e.g. the AI tool pw_generate) – never touches a vault. */
+  generate(opts = {}) { return pwc.generate(opts); }
+  strength(pw) { return pwc.strength(pw); }
   stop() { for (const t of this.timers) clearInterval(t); this.timers = []; for (const s of this.stores.values()) { try { s.lock(); } catch { /* ignore */ } } }
   get cfg() { const s = this.ctx.settings.get(); if (!s.passwords) s.passwords = { instances: [], ext: [], autoLockMin: 15, audit: { hibp: true } }; if (!s.passwords.ext) s.passwords.ext = []; if (!s.passwords.instances) s.passwords.instances = []; if (!s.passwords.audit) s.passwords.audit = { hibp: true }; return s.passwords; }
   list() { return this.cfg.instances; }
@@ -405,7 +408,7 @@ class PasswordManager {
     fs.mkdirSync(dir, { recursive: true });
     for (const f of fs.readdirSync(src)) if (fs.statSync(path.join(src, f)).isFile()) fs.copyFileSync(path.join(src, f), path.join(dir, f));
     const m = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
-    if (fx) m.background = { scripts: ['background.js'] }; else { m.background = { service_worker: 'background.js' }; delete m.browser_specific_settings; }
+    if (fx) m.background = { scripts: fs.existsSync(path.join(src, 'i18n.js')) ? ['i18n.js', 'background.js'] : ['background.js'] }; else { m.background = { service_worker: 'background.js' }; delete m.browser_specific_settings; }
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(m, null, 2));
     await host.core('util').zipDir(dir, zip);
     if (fx) fs.copyFileSync(zip, out); // bsdtar picks the format by the extension – so .zip first, then copy

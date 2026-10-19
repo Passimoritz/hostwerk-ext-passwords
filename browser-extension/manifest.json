@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Hostwerk Passwörter",
-  "description": "Passwörter aus deinem Hostwerk: Vorschläge im Anmeldefeld, ausfüllen, speichern. Spricht nur mit Hostwerk auf diesem PC.",
-  "version": "1.4.0",
+  "name": "Hostwerk Passwords",
+  "description": "Passwords from your Hostwerk: suggestions in the sign-in field, fill in, save. Only talks to Hostwerk on this PC.",
+  "version": "1.5.0",
   "permissions": [
     "storage",
     "activeTab",
@@ -17,12 +17,13 @@
   "background": {
     "service_worker": "background.js",
     "scripts": [
+      "i18n.js",
       "background.js"
     ]
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Hostwerk Passwörter",
+    "default_title": "Hostwerk Passwords",
     "default_icon": {
       "16": "icon16.png",
       "32": "icon32.png"
@@ -34,7 +35,7 @@
         "default": "Ctrl+Shift+L",
         "mac": "Command+Shift+L"
       },
-      "description": "Ersten passenden Zugang ausfüllen"
+      "description": "Fill in the first matching login"
     }
   },
   "content_scripts": [
@@ -44,6 +45,7 @@
         "https://*/*"
       ],
       "js": [
+        "i18n.js",
         "content.js"
       ],
       "run_at": "document_idle",
