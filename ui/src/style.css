@@ -21,7 +21,8 @@
 
 /* Passwords: browsers found on this PC */
 .br-opt { display: inline-flex; align-items: center; gap: 6px; }
-.br-opt.miss { opacity: .5; }
+.br-opt.miss { color: var(--muted); } /* nicht installiert: gedämpft, aber lesbar (Kontrast WCAG AA) */
+.br-opt.miss .br-dot { opacity: .45; }
 .br-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
 .br-opt.have .br-dot { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent); }
 .br-opt.have .br-chrome { background: #34a853; } .br-opt.have .br-edge { background: #0ea5e9; } .br-opt.have .br-firefox { background: #ff7139; }

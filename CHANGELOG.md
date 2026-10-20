@@ -1,3 +1,7 @@
+## 1.0.2
+
+- Browsers that are not installed are shown dimmed but readable (contrast, WCAG AA). / Nicht installierte Browser gedämpft, aber gut lesbar (Kontrast, WCAG AA).
+
 ## 1.0.1
 
 - Browser extension in English and German (follows the browser language), version 1.5.0. / Browser-Erweiterung auf Englisch und Deutsch (richtet sich nach der Browsersprache), Fassung 1.5.0.

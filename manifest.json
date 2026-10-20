@@ -9,7 +9,7 @@
     "de": "Eigener verschlüsselter Tresor oder Bitwarden/Vaultwarden, 1Password, KeePass, pass und LastPass – mit Browser-Erweiterung, Sicherheitsprüfung (Have I Been Pwned), 2FA-Codes, Generator, Teilen mit Mitgliedern und Import aus allen gängigen Diensten.",
     "en": "Own encrypted vault or Bitwarden/Vaultwarden, 1Password, KeePass, pass and LastPass – with browser extension, security check (Have I Been Pwned), 2FA codes, generator, sharing with members and import from every common service."
   },
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-passwords",
   "license": "MIT",
