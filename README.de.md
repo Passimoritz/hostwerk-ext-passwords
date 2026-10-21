@@ -19,7 +19,9 @@ Eigener verschlüsselter Tresor auf diesem PC oder die Anbindung an den Passwort
 - Import: CSV/JSON aller gängigen Dienste, **KeePass .kdbx und XML**, **1Password .1pux**, **Bitwarden-JSON mit Passwort**, Enpass-JSON, jede CSV mit eigener Spaltenzuordnung – mit Vorschau und Duplikat-Erkennung
 - Export verschlüsselt (KeePass .kdbx, Bitwarden-JSON mit Passwort); unverschlüsselt nur nach deutlicher Warnung. Kopieren zwischen Tresoren
 - Tägliche verschlüsselte Sicherung (14 Stände) in Hostwerks Sicherungs-Zentrale, samt Zurückholen
+- Eigene Bilder je Eintrag (Hostwerk-Tresor verschlüsselt, KeePass als eigene Symbole) – in Liste, Detail und Browser-Erweiterung; Bitwarden/1Password/pass/LastPass behalten das Webseiten-Symbol
 - Browser-Erweiterung für Chrome, Edge, Firefox, Brave, Opera und Vivaldi – koppelt sich selbst, Vorschläge direkt im Anmeldefeld
+  - bleibt ohne Hilfe verbunden: nach Hostwerk-Neustart, Port-Wechsel oder Update koppelt sie sich mit der Datei in ihrem Ordner neu; das Popup nennt die echte Ursache (Hostwerk läuft nicht, Kopplung abgelaufen, Tresor gesperrt) und bietet „Jetzt aktualisieren“
 - Einzelne Zugänge mit Mitgliedern teilen (braucht „Team & Benutzer“), auch befristet
 - **Tresor als Dienst für andere Erweiterungen**: Dateifreigabe, Mailserver, Router oder Cloud-Sicherung legen ihre Zugänge mit einem Aufruf im Tresor ab – jede Erweiterung sieht nur ihre eigenen Einträge
 

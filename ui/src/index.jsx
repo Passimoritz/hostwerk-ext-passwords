@@ -88,10 +88,26 @@ async function removeVault(v, reload) {
   } catch (e) { toast.error(e.message); }
 }
 
+/**
+ * Browser extension card: shows the current state first – connected (browser, version, last seen, remove), waiting (only
+ * the next step lights up), problem (cause + fix) – and keeps the full guide one click away ("Show guide").
+ * The state comes from Hostwerk (/pw/ext/state): pairings, the extension's last "hello" and the last pairing error.
+ */
+const REASON = {
+  ticket: { text: 'The pairing file in the extension folder is out of date.', fix: 'Install again – the extension then connects by itself.' },
+  expired: { text: 'The extension lost its pairing (e.g. after removing it in Hostwerk).', fix: 'Install again – the extension then connects by itself.' },
+  window: { text: 'The extension asked to pair, but “Install” was clicked more than 15 minutes ago.', fix: 'Install again – the extension then connects by itself.' },
+  'needs-install': { text: 'The extension is loaded but not paired yet.', fix: 'Install again – the extension then connects by itself.' },
+  unknown: { text: 'An extension with another id asked to pair (e.g. a copy from somewhere else).', fix: 'Load the folder below in the browser, or pair with a code.' },
+  code: { text: 'A pairing code was wrong or expired.', fix: 'Show a new pairing code.' },
+};
 function ExtensionCard({ data, reload }) {
   const [code, setCode] = useState(null);
   const [left, setLeft] = useState(0);
   const det = useApi('/pw/browsers', [], { live: false });
+  const st = useApi('/pw/ext/state', [], { live: false, poll: true });
+  useEffect(() => on('passwords-ext', () => st.reload()), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => on('passwords', () => st.reload()), []); // eslint-disable-line react-hooks/exhaustive-deps
   const found = det.data || [];
   const [browser, setBrowserRaw] = useState(null);
   const pickedOnce = useRef(false);
@@ -101,6 +117,7 @@ function ExtensionCard({ data, reload }) {
     .map((b) => { const f = found.find((x) => x.id === b.id); return { id: b.id, label: <span className={`br-opt ${f ? 'have' : 'miss'}`}><span className="br-dot" style={{ '--br': BROWSER_COLORS[b.id] }} />{b.label}{f && f.default ? <span className="br-def">{t('Default')}</span> : null}</span> }; });
   const [inst, setInst] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [guide, setGuide] = useState(false);
   const fx = browser === 'firefox';
   const label = (BROWSERS.find((b) => b.id === browser) || BROWSERS[0]).label;
   const isFound = found.some((f) => f.id === browser);
@@ -113,52 +130,68 @@ function ExtensionCard({ data, reload }) {
   const newCode = async () => { try { const c = await get('/pw/ext/pair-code'); setCode({ ...c, until: Date.now() + (c.expiresIn || 600) * 1000 }); } catch (e) { toast.error(e.message); } };
   const install = async () => {
     setBusy(true);
-    try { const r = await post('/pw/extension/install', { browser }); setInst(r); if (r.opened) toast.success(r.mode === 'dev' ? t('Extension page opened in {label}', { label }) : t('{label} opened – click “Add” there', { label })); else toast.warn(t('{label} could not be opened – the steps below still apply', { label })); } catch (e) { toast.error(e.message); }
+    try { const r = await post('/pw/extension/install', { browser }); setInst(r); setGuide(true); if (r.opened) toast.success(r.mode === 'dev' ? t('Extension page opened in {label}', { label }) : t('{label} opened – click “Add” there', { label })); else toast.warn(t('{label} could not be opened – the steps below still apply', { label })); st.reload(); } catch (e) { toast.error(e.message); }
     setBusy(false);
   };
   const mode = inst ? inst.mode : null;
-  const steps = inst ? extSteps({ mode, fx, label, registered: inst.registered }) : [];
-  // After installing, wait until the extension pairs itself (one-time ticket in the folder)
-  const [linked, setLinked] = useState(null);
-  useEffect(() => {
-    if (!inst || !inst.autoPair || linked) return undefined;
-    const x = setInterval(async () => { try { const r = await get(`/pw/ext/paired-since?t=${inst.since}`); if (r.paired) { setLinked(r.name); reload(); toast.success(t('{name} is connected to Hostwerk', { name: r.name })); } } catch { /* ignore */ } }, 2000);
-    return () => clearInterval(x);
-  }, [inst, linked]); // eslint-disable-line react-hooks/exhaustive-deps
+  const s = st.data || {};
+  const live = (s.ext || []).filter((e) => !e.expired);
+  const since = inst ? inst.since : 0;
+  const linkedNow = inst && live.find((e) => e.created >= since);
+  useEffect(() => { if (linkedNow) { toast.success(t('{name} is connected to Hostwerk', { name: linkedNow.name })); reload(); } }, [linkedNow && linkedNow.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Welcher Schritt ist dran? Ohne „Hallo“ der Erweiterung: laden (Schritt 3 bzw. „Hinzufügen“); mit „Hallo“: verbinden
+  const helloAfter = s.hello && (!inst || s.hello.at >= since);
+  const steps = extSteps({ mode, fx, label, registered: inst && inst.registered });
+  const current = inst && !linkedNow ? (helloAfter ? steps.length - 1 : Math.max(0, steps.length - 2)) : null;
+  // Problem: letzte Ursache aus Hostwerk (Kopplungsfehler) oder das „Hallo“ einer ungekoppelten Erweiterung
+  const problem = !linkedNow && ((s.error && (!inst || s.error.at >= since - 1000) && REASON[s.error.reason] && { ...REASON[s.error.reason], reason: s.error.reason }) || (s.hello && !s.hello.paired && s.hello.reason && REASON[s.hello.reason] && { ...REASON[s.hello.reason], reason: s.hello.reason }));
+  const outdated = live.filter((e) => e.outdated);
   const mm = Math.floor(left / 60); const ss = String(left % 60).padStart(2, '0');
+  const showGuide = guide || (!live.length && !problem) || (inst && !linkedNow);
   return (
     <div className="card">
-      <div className="card-head"><Puzzle size={16} /><h3>Browser extension</h3><InfoTip>{t('The extension only talks to your Hostwerk (127.0.0.1).')}</InfoTip></div>
-      <div className="card-body stack" style={{ gap: 12 }}>
-        <div className="row" style={{ gap: 10, flexWrap: 'wrap', alignItems: 'center' }}><span className="small bold">{t('Browser')}</span>{browser ? <Seg value={browser} onChange={(b) => { setBrowser(b); setInst(null); setLinked(null); }} options={browserOpts} /> : <span className="small muted">{t('Looking for browsers …')}</span>}{det.data && <span className="tiny muted">{found.length ? t('{n} found on this PC – marked in colour', { n: found.length }) : t('No browser found – choose yours.')}</span>}</div>
-        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-          <Btn className="primary sm" icon={Download} busy={busy} disabled={!browser} title={isFound ? '' : t('{label} was not found on this PC', { label })} onClick={install}>{t('Install in {label}', { label })}</Btn>
-          <a className="btn sm" href={`/api/pw/extension/${browser}`}><Download />{fx ? t('Download .xpi') : t('Download ZIP')}</a>
-        </div>
-        {inst && linked ? (
-          <ExtLinked name={linked} browser={label} />
-        ) : inst ? (
-          <div className="stack" style={{ gap: 8 }}>
-            <div className="small bold">{inst.opened ? t('{label} is open – this is how it goes on', { label }) : t('The extension is ready')}</div>
-            {mode === 'dev' && <div className="row-tight small" style={{ margin: '4px 0 6px' }}><span className="muted">{fx ? t('File') : t('Folder')}</span><code className="ellipsis" style={{ maxWidth: 420 }}>{inst.dir || inst.file}</code><button className="btn ghost xs icon" title="Copy path" aria-label={t('Copy path')} onClick={() => copyText(inst.dir || inst.file)}><Copy /></button>{!inst.opened && inst.url && <span className="tiny muted">{t('→ open {url} in the browser', { url: inst.url })}</span>}</div>}
-            {mode === 'store' && !inst.opened && inst.page && <a className="btn sm" href={inst.page} target="_blank" rel="noreferrer">{t('Open the store page')}</a>}
-            <ExtGuide steps={steps} waiting={!!inst.autoPair} />
-            {inst.autoPair && <div className="row-tight tiny muted" style={{ marginTop: 6 }}><RefreshCw size={12} className="spin" />{t('Waiting for the extension – once it is loaded it connects by itself.')}</div>}
-            {mode === 'dev' && <div className="tiny muted">{t('The browsers themselves ask for developer mode – they only install extensions from their store silently.')}</div>}
+      <div className="card-head"><Puzzle size={16} aria-hidden="true" /><h3>Browser extension</h3><InfoTip>{t('The extension only talks to your Hostwerk (127.0.0.1). It finds Hostwerk again by itself after a restart or a port change and pairs again with the file in its folder – no code needed.')}</InfoTip></div>
+      <div className="card-body stack pw-ext-card">
+        {/* Zustand zuerst */}
+        {linkedNow ? <ExtLinked name={linkedNow.name} browser={label} />
+          : live.length > 0 && <div className="stack pw-gap-1" role="status"><div className="small bold row-tight"><span className="live" aria-hidden="true" />{t('Connected')}</div>
+            <div className="pw-ext-list">{live.map((e, i) => { const id = browserId(e.browser, e.name); const active = e.lastUse && Date.now() - e.lastUse < 10 * 60000; return <div key={e.id} className="pw-ext-row" style={{ animationDelay: `${i * 40}ms` }}><BrowserMark id={id} /><span className="grow small">{e.name} <span className="muted tiny">{e.browser ? e.browser.replace(/\/[\d.]+$/, '') + ' · ' : ''}{e.version ? t('version {v}', { v: e.version }) + ' · ' : ''}{e.lastUse ? t('last seen {date}', { date: fmtDate(e.lastUse) }) : t('paired {date}', { date: fmtDate(e.created) })}</span>{e.outdated && <span className="tiny c-warn pw-ext-old">{t('Older version – click “Update now” in the extension’s popup (or reload it in the browser’s extension page).')}</span>}</span>{active && <span className="live" title={t('Used in the last 10 minutes')} />}<button type="button" className="btn ghost xs icon" title={t('Remove pairing')} aria-label={t('Remove the pairing of {name}', { name: e.name })} onClick={async () => { await del(`/pw/ext/${e.id}`); reload(); st.reload(); }}><Trash2 /></button></div>; })}</div>
+            {outdated.length > 0 && <div className="tiny muted">{t('Hostwerk already put version {v} into the extension folder.', { v: s.latest })}</div>}
+          </div>}
+        {problem && <Callout kind="warn" dismissible={false}><div className="stack pw-gap-1"><b>{t(problem.text)}</b><span className="small">{t(problem.fix)}</span><div className="row-tight">{problem.reason === 'code' ? <Btn className="xs" icon={KeyRound} onClick={newCode}>Show pairing code</Btn> : <Btn className="xs primary" icon={Download} busy={busy} disabled={!browser} onClick={install}>{t('Install in {label}', { label })}</Btn>}</div></div></Callout>}
+        {s.hello && !s.hello.paired && !problem && !linkedNow && <div className="small muted" role="status">{t('The extension is loaded (version {v}) and is connecting …', { v: s.hello.version || '?' })}</div>}
+
+        {/* Anleitung: aufgeklappt, solange nichts verbunden ist oder gerade installiert wird */}
+        {!showGuide ? <div><button type="button" className="btn ghost sm" aria-expanded="false" onClick={() => setGuide(true)}>{t('Show guide')}</button></div> : <>
+          <div className="row pw-ext-pick"><span className="small bold">{t('Browser')}</span>{browser ? <Seg value={browser} onChange={(b) => { setBrowser(b); setInst(null); }} options={browserOpts} /> : <span className="small muted">{t('Looking for browsers …')}</span>}{det.data && <span className="tiny muted">{found.length ? t('{n} found on this PC – marked in colour', { n: found.length }) : t('No browser found – choose yours.')}</span>}</div>
+          <div className="row pw-ext-pick">
+            <Btn className="primary sm" icon={Download} busy={busy} disabled={!browser} title={isFound ? '' : t('{label} was not found on this PC', { label })} onClick={install}>{t('Install in {label}', { label })}</Btn>
+            <a className="btn sm" href={`/api/pw/extension/${browser}`}><Download />{fx ? t('Download .xpi') : t('Download ZIP')}</a>
+            {live.length > 0 && <button type="button" className="btn ghost sm" aria-expanded="true" onClick={() => setGuide(false)}>{t('Hide guide')}</button>}
           </div>
-        ) : browser ? <div className="stack" style={{ gap: 8 }}><div className="small muted">{t('This is how it goes – “Install in {label}” does the start:', { label })}</div><ExtGuide steps={extSteps({ mode: null, fx, label })} /></div> : null}
-        <div className="stack" style={{ gap: 6 }}>
-          <div className="row-tight"><Btn className="sm" icon={code ? RefreshCw : KeyRound} onClick={newCode}>{code ? t('New pairing code') : t('Show pairing code')}</Btn>{code && <Btn className="sm ghost" icon={EyeOff} onClick={() => setCode(null)}>Hide</Btn>}</div>
-          {code && (
-            <div className="pw-code">
-              <b>{code.code}</b>
-              <div className="grow small muted">{t('Port {port} · valid for', { port: code.port })} <b className={left < 60 ? 'c-warn' : ''}>{mm}:{ss}</b> · {t('enter it in the extension’s popup')}<div className="progress" style={{ marginTop: 6 }}><div style={{ width: `${(left / (code.expiresIn || 600)) * 100}%` }} /></div></div>
-              <button className="btn ghost xs icon" title="Copy code" aria-label={t('Copy code')} onClick={() => copyText(code.code)}><Copy /></button>
+          {inst && !linkedNow ? (
+            <div className="stack pw-gap-1">
+              <div className="small bold">{inst.opened ? t('{label} is open – this is how it goes on', { label }) : t('The extension is ready')}</div>
+              {mode === 'dev' && <div className="row-tight small"><span className="muted">{fx ? t('File') : t('Folder')}</span><code className="ellipsis pw-ext-path">{inst.dir || inst.file}</code><button type="button" className="btn ghost xs icon" title={t('Copy path')} aria-label={t('Copy path')} onClick={() => copyText(inst.dir || inst.file)}><Copy /></button>{!inst.opened && inst.url && <span className="tiny muted">{t('→ open {url} in the browser', { url: inst.url })}</span>}</div>}
+              {mode === 'store' && !inst.opened && inst.page && <a className="btn sm" href={inst.page} target="_blank" rel="noreferrer">{t('Open the store page')}</a>}
+              <ExtGuide steps={steps} current={current} />
+              <div className="row-tight tiny muted" role="status"><RefreshCw size={12} className="spin" aria-hidden="true" />{helloAfter ? t('The extension is loaded – it is connecting …') : t('Waiting for the extension – once it is loaded it connects by itself.')}</div>
             </div>
-          )}
-        </div>
-        <div className="tiny muted">{t('In the browser: click the icon for matches of the page, search and the generator; Ctrl+Shift+L fills in the first match; after a sign-in the extension offers to save it. Load updates again here – Hostwerk reports them under self-maintenance.')}</div>
-        {data.ext.length > 0 && <div className="stack" style={{ gap: 6 }}><div className="small bold">{t('Paired browsers')}</div><div className="pw-ext-list">{data.ext.map((e, i) => { const id = browserId(e.browser, e.name); const active = e.lastUse && Date.now() - e.lastUse < 10 * 60000; return <div key={e.id} className="pw-ext-row" style={{ animationDelay: `${i * 40}ms` }}><BrowserMark id={id} /><span className="grow small">{e.name} <span className="muted tiny">{e.browser ? e.browser.replace(/\/[\d.]+$/, '') + ' · ' : ''}{t('paired {date}', { date: fmtDate(e.created) })}{e.lastUse ? ` · ${t('last {date}', { date: fmtDate(e.lastUse) })}` : ''}</span></span>{active && <span className="live" title={t('Used in the last 10 minutes')} />}<button className="btn ghost xs icon" title="Remove pairing" aria-label={t('Remove pairing')} onClick={async () => { await del(`/pw/ext/${e.id}`); reload(); }}><Trash2 /></button></div>; })}</div></div>}
+          ) : browser && !inst ? <div className="stack pw-gap-1"><div className="small muted">{t('This is how it goes – “Install in {label}” does the start:', { label })}</div><ExtGuide steps={extSteps({ mode: null, fx, label })} /></div> : null}
+          <details className="pw-ext-code"><summary className="small">{t('Pair with a code instead')}</summary>
+            <div className="stack pw-gap-1">
+              <div className="row-tight"><Btn className="sm" icon={code ? RefreshCw : KeyRound} onClick={newCode}>{code ? t('New pairing code') : t('Show pairing code')}</Btn>{code && <Btn className="sm ghost" icon={EyeOff} onClick={() => setCode(null)}>Hide</Btn>}</div>
+              {code && (
+                <div className="pw-code">
+                  <b>{code.code}</b>
+                  <div className="grow small muted">{t('Port {port} · valid for', { port: code.port })} <b className={left < 60 ? 'c-warn' : ''}>{mm}:{ss}</b> · {t('enter it in the extension’s popup')}<div className="progress pw-code-bar"><div style={{ width: `${(left / (code.expiresIn || 600)) * 100}%` }} /></div></div>
+                  <button type="button" className="btn ghost xs icon" title={t('Copy code')} aria-label={t('Copy code')} onClick={() => copyText(code.code)}><Copy /></button>
+                </div>
+              )}
+            </div>
+          </details>
+        </>}
+        <div className="tiny muted">{t('In the browser: click the icon for matches of the page, search and the generator; Ctrl+Shift+L fills in the first match; after a sign-in the extension offers to save it.')}</div>
       </div>
     </div>
   );

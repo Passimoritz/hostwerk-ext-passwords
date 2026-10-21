@@ -23,16 +23,18 @@ const Art = {
   ),
 };
 
-/** steps: [{ art, title, text }] · waiting: the last step pulses · done: everything ticked */
-export function ExtGuide({ steps, waiting, done }) {
+/** steps: [{ art, title, text }] · waiting: the last step pulses · current: this step pulses, the ones before are ticked · done: everything ticked */
+export function ExtGuide({ steps, waiting, done, current = null }) {
   return (
     <ol className={`xg ${done ? 'done' : ''}`}>
       {steps.map((s, i) => {
         const A = Art[s.art] || Art.page;
         const last = i === steps.length - 1;
+        const now = current != null ? i === current : last && waiting;
+        const past = done || (current != null && i < current);
         return (
-          <li key={i} className={`xg-step ${last && waiting && !done ? 'wait' : ''}`} style={{ animationDelay: `${i * 70}ms` }}>
-            <div className="xg-pic"><A /><span className="xg-n">{done ? <Check size={11} /> : i + 1}</span></div>
+          <li key={i} className={`xg-step ${now && !done ? 'wait' : ''} ${past ? 'xg-past' : ''}`} aria-current={now && !done ? 'step' : undefined} style={{ animationDelay: `${i * 70}ms` }}>
+            <div className="xg-pic"><A /><span className="xg-n">{past ? <Check size={11} /> : i + 1}</span></div>
             <div className="xg-tx"><b>{s.title}</b>{s.text && <span>{s.text}</span>}</div>
           </li>
         );

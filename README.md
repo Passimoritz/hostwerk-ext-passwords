@@ -19,7 +19,9 @@ Own encrypted vault on this PC or a connection to the password manager you alrea
 - Import: CSV/JSON of every common service, **KeePass .kdbx and XML**, **1Password .1pux**, **Bitwarden JSON with password**, Enpass JSON, any CSV with your own column assignment – with preview and duplicate detection
 - Export encrypted (KeePass .kdbx, Bitwarden JSON with password); unencrypted only after a clear warning. Copy between vaults
 - Daily encrypted backups (14 kept) in Hostwerk’s backup centre, including restore
+- Own images per item (Hostwerk vault encrypted, KeePass as custom icons) – shown in list, detail and browser extension; Bitwarden/1Password/pass/LastPass keep the website icon
 - Browser extension for Chrome, Edge, Firefox, Brave, Opera and Vivaldi – pairs itself, suggestions right in the sign-in field
+  - stays connected without help: after a Hostwerk restart, a port change or an update it pairs again with the file in its folder; the popup names the real cause (Hostwerk not running, pairing ran out, vault locked) and offers “Update now”
 - Share single logins with members (needs “Team & users”), also time-limited
 - **Vault service for other extensions**: file share, mail server, router or cloud backup keep their logins in the vault with one call – each extension only ever sees its own entries
 

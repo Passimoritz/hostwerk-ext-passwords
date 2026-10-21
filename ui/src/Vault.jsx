@@ -4,7 +4,7 @@ import { get, post, on, fmtDate, waitJob } from '@hostwerk/api';
 import { Btn, Empty, Loading, Callout, toast, InfoTip } from '@hostwerk/ui';
 import { SvcImage, AiHint } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
-import { ItemView, ItemDialog, Generator, SiteIcon, StrengthDot, TYPE_LABEL, copy, clip } from './Item';
+import { ItemView, ItemDialog, Generator, SiteIcon, StrengthDot, TYPE_LABEL, copy, clip, iconSrc } from './Item';
 import { ImportExport } from './IO';
 
 export { clearLater, Generator } from './Item';
@@ -181,7 +181,7 @@ function VaultApp({ v, data, reload, initialTab }) {
         <div ref={list} className="pw-list" role="listbox" aria-label={t('Items')}>
           {!items ? <Loading /> : items.length === 0 ? (empty ? null : <div className="pw-list-none small muted">{q ? t('Nothing found for “{q}”.', { q }) : nav === 'trash' ? t('The trash is empty.') : t('Nothing here yet.')}</div>) : items.map((it) => (
             <div key={it.id} data-id={it.id} className={`pw-item ${sel === it.id ? 'active' : ''}`} role="option" aria-selected={sel === it.id} tabIndex={sel === it.id || (!sel && it === items[0]) ? 0 : -1} onClick={() => setSel(it.id)} onKeyDown={(e) => { if (e.key === 'Enter') setSel(it.id); }}>
-              <SiteIcon host={it.host} name={it.name} type={it.type} />
+              <SiteIcon src={iconSrc(v.id, it)} host={it.host} name={it.name} type={it.type} />
               <div className="grow pw-item-text"><div className="small bold ellipsis">{it.name}{it.favorite && <Star size={11} className="pw-fav-mark" aria-label={t('Favourite')} />}</div><div className="tiny muted ellipsis">{it.username || it.host || it.notesPreview || (it.cardLast4 ? `•••• ${it.cardLast4}` : '') || t(TYPE_LABEL[it.type] || 'Login')}</div></div>
               <div className="pw-item-tags">{it.hasTotp && <span className="pw-chip" title={t('2FA code saved')}>2FA</span>}{it.passkeyCount > 0 && <Fingerprint size={13} aria-label={t('Passkey')} />}{it.attachmentCount > 0 && <Paperclip size={13} aria-label={t('Attachments')} />}<StrengthDot score={it.pwScore} /></div>
               {nav === 'trash' && <Btn className="xs" onClick={async (e) => { e.stopPropagation(); await post(`/pw/${v.id}/items/${it.id}/restore`); load(); }}>Restore</Btn>}
@@ -191,7 +191,7 @@ function VaultApp({ v, data, reload, initialTab }) {
       </section>}
 
       {!tool && <section className="pw-detail-col" aria-label={t('Details')}>
-        {sel ? <ItemView v={v} id={sel} onEdit={(it) => setEdit(it)} onChanged={(id) => { if (!id) setSel(null); load(); }} onBack={() => setSel(null)} />
+        {sel ? <ItemView v={v} id={sel} iconWhy={(data.providers.find((p) => p.id === v.type) || {}).iconsWhy || null} onEdit={(it) => setEdit(it)} onChanged={(id) => { if (!id) setSel(null); load(); }} onBack={() => setSel(null)} />
           : empty ? <Empty icon={KeyRound} title="Your vault is still empty" text="Create the first item – or bring everything over from your old password manager in one go.">{!v.readonly && <div className="row-tight"><Btn className="primary" icon={Plus} onClick={() => setEdit(null)}>New item</Btn><Btn icon={Upload} onClick={() => setNav('tool:io')}>Import</Btn></div>}</Empty>
           : <div className="pw-detail-hint"><KeyRound size={28} aria-hidden="true" /><div className="small">{t('Pick an item – a click on the copy symbol copies the value.')}</div><div className="tiny muted">{t('Ctrl+F search · ↑/↓ choose · Ctrl+C copy password')}</div></div>}
       </section>}

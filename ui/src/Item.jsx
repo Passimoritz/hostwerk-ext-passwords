@@ -35,12 +35,17 @@ export function StrengthDot({ score }) {
   return <span className={`pw-dot pw-dot-${k}`} role="img" aria-label={t('Password: {label}', { label: t(SCORE_LABEL[score]) })} title={t('Password: {label}', { label: t(SCORE_LABEL[score]) })} />;
 }
 
-/** Website icon (cached locally by Hostwerk) – otherwise the first letter on a colour from the name. */
-export function SiteIcon({ host, name, type, size = 32 }) {
+/** Address of an item's own image (null without one) – v changes with every new image, so the browser reloads it. */
+export const iconSrc = (vaultId, it) => (it && it.hasIcon ? `/api/pw/${vaultId}/items/${encodeURIComponent(it.id)}/icon?v=${it.iconV || 1}` : null);
+/** Own image → website icon (cached locally by Hostwerk) → first letter on a colour from the name. */
+export function SiteIcon({ host, name, type, size = 32, src = null }) {
   const [bad, setBad] = useState(false);
+  const [badSrc, setBadSrc] = useState(false);
   useEffect(() => setBad(false), [host]);
+  useEffect(() => setBadSrc(false), [src]);
   const I = TYPE_ICON[type] || Globe;
   const hue = [...String(name || '?')].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+  if (src && !badSrc) return <img className="pw-ico pw-ico-own" src={src} alt="" width={size} height={size} loading="lazy" onError={() => setBadSrc(true)} />;
   if (host && !bad && type === 'login') return <img className="pw-ico" src={`/api/pw/icon/${encodeURIComponent(host)}`} alt="" width={size} height={size} loading="lazy" onError={() => setBad(true)} />;
   return <span className="pw-ico pw-ico-letter" aria-hidden="true" style={{ width: size, height: size, '--pw-hue': hue }}>{type === 'login' || !type ? String(name || '?').trim().charAt(0).toUpperCase() || '?' : <I size={Math.round(size * 0.5)} />}</span>;
 }
@@ -146,6 +151,34 @@ export function Generator({ onUse, site: initialSite = '' }) {
   );
 }
 
+/* ---------- own image of an item: made small in the browser (128 px, PNG – or WebP when that is smaller) ---------- */
+async function toIcon(file) {
+  if (!/^image\/(png|jpe?g|webp|gif|bmp)$/i.test(file.type || '')) throw new Error(t('Please choose a PNG, JPEG, WebP, GIF or BMP image.'));
+  const bmp = await createImageBitmap(file);
+  const S = 128; const k = Math.min(1, S / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * k)); const h = Math.max(1, Math.round(bmp.height * k));
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, w, h);
+  let out = cv.toDataURL('image/png');
+  if (out.length > 120000) out = cv.toDataURL('image/webp', 0.85);
+  if (out.length > 170000) throw new Error(t('The image is still too big after shrinking it.'));
+  return out;
+}
+/** Own image: choose / change / remove – or the reason why the provider cannot store one. */
+function IconPicker({ v, it, why, onDone }) {
+  const file = useRef(null);
+  const [busy, setBusy] = useState(false);
+  if (why) return <span className="row-tight pw-icon-pick"><Btn className="xs ghost" icon={ImageUp} disabled>Own image</Btn><InfoTip>{t(why)}</InfoTip></span>;
+  const set = async (data) => { setBusy(true); try { await put(`/pw/${v.id}/items/${encodeURIComponent(it.id)}/icon`, { data }); toast.success(data ? t('Image saved') : t('Image removed')); onDone(); } catch (e) { toast.error(e.message); } setBusy(false); };
+  return (
+    <span className="row-tight pw-icon-pick">
+      <input ref={file} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden onChange={async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; try { await set(await toIcon(f)); } catch (er) { toast.error(er.message); } }} />
+      <Btn className="xs ghost" icon={ImageUp} busy={busy} onClick={() => file.current.click()}>{it.hasIcon ? t('Change image') : t('Own image')}</Btn>
+      {it.hasIcon && <button type="button" className="btn ghost xs icon" title={t('Remove image')} aria-label={t('Remove image')} onClick={() => set(null)}><Trash2 /></button>}
+    </span>
+  );
+}
+
 /* ---------- detail view ---------- */
 function Row({ label, value, secret, shown, mono = true, link, multiline }) {
   if (!value) return null;
@@ -165,7 +198,7 @@ const IDENTITY = [['title', 'Title'], ['firstName', 'First name'], ['lastName', 
 const fmtSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const toB64 = (file) => new Promise((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.onerror = fail; r.readAsDataURL(file); });
 
-export function ItemView({ v, id, onEdit, onChanged, onBack }) {
+export function ItemView({ v, id, onEdit, onChanged, onBack, iconWhy = null }) {
   const [it, setIt] = useState(null);
   const [sharing, setSharing] = useState(false);
   const [show, setShow] = useState(false);
@@ -203,8 +236,8 @@ export function ItemView({ v, id, onEdit, onChanged, onBack }) {
     <div className="pw-detail-card">
       <div className="pw-detail-head">
         {onBack && <button type="button" className="btn ghost sm pw-back" onClick={onBack} aria-label={t('Back to the list')}>←</button>}
-        <SiteIcon host={(it.urls || [])[0] ? (() => { try { return new URL(/^https?:\/\//.test(it.urls[0]) ? it.urls[0] : `https://${it.urls[0]}`).hostname; } catch { return ''; } })() : ''} name={it.name} type={it.type} size={40} />
-        <div className="grow pw-detail-title"><h2 className="ellipsis">{it.name}</h2><div className="tiny muted row-tight"><I size={12} aria-hidden="true" />{t(TYPE_LABEL[it.type] || 'Login')}{it.folder && <><Folder size={12} aria-hidden="true" />{it.folder}</>}</div></div>
+        <SiteIcon src={iconSrc(v.id, it)} host={(it.urls || [])[0] ? (() => { try { return new URL(/^https?:\/\//.test(it.urls[0]) ? it.urls[0] : `https://${it.urls[0]}`).hostname; } catch { return ''; } })() : ''} name={it.name} type={it.type} size={40} />
+        <div className="grow pw-detail-title"><h2 className="ellipsis">{it.name}</h2><div className="tiny muted row-tight"><I size={12} aria-hidden="true" />{t(TYPE_LABEL[it.type] || 'Login')}{it.folder && <><Folder size={12} aria-hidden="true" />{it.folder}</>}{!v.readonly && <IconPicker v={v} it={it} why={iconWhy} onDone={() => { load(); onChanged(id); }} />}</div></div>
         <div className="row-tight pw-detail-actions">
           {!v.readonly && <button type="button" className={`btn ghost sm icon ${it.favorite ? 'pw-fav-on' : ''}`} aria-pressed={!!it.favorite} title={it.favorite ? t('Remove from favourites') : t('Add to favourites')} aria-label={it.favorite ? t('Remove from favourites') : t('Add to favourites')} onClick={fav}><Star /></button>}
           {own && <button type="button" className="btn ghost sm icon" title={t('Share with members')} aria-label={t('Share with members')} onClick={() => setSharing(true)}><Users /></button>}

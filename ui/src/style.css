@@ -29,6 +29,16 @@
 .pw-fav-mark { margin-left: var(--sp-1); color: var(--warn); vertical-align: -1px; }
 .pw-ico { flex: none; width: 32px; height: 32px; border-radius: var(--r-md); object-fit: contain; background: var(--surface-2); }
 .pw-ico-letter { display: inline-grid; place-items: center; font-weight: 700; font-size: var(--fs-md); color: var(--text); background: color-mix(in srgb, hsl(var(--pw-hue, 220) 60% 50%) 22%, var(--surface)); }
+.pw-ico-own { background: var(--surface); object-fit: cover; }
+.pw-icon-pick { margin-left: var(--sp-2); }
+.pw-ext-card { gap: var(--sp-3); }
+.pw-ext-pick { gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
+.pw-ext-path { max-width: 420px; }
+.pw-ext-old { display: block; margin-top: 2px; }
+.pw-ext-code summary { cursor: pointer; min-height: 24px; }
+.pw-code-bar { margin-top: var(--sp-1); }
+.xg-step.xg-past .xg-n { background: var(--ok); }
+.xg-step.xg-past { opacity: .8; }
 .pw-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .pw-dot-weak { background: var(--err); }
 .pw-dot-fair { background: var(--warn); }
