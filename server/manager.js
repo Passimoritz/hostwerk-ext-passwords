@@ -8,8 +8,10 @@
  *   - TOTP codes, password generator, history, trash, folders/tags
  *   - Browser extension: pairing by code, an own key per browser (settings.passwords.ext), matches per page, filling in,
  *     saving new logins; the extension is only downloaded from Hostwerk (/api/pw/extension.zip)
- *   - Self-maintenance: CLIs (bw, op) with version check and test run, kdbxweb version, HIBP reachability,
- *     online catalogue pw-catalog.json (new formats/providers without a release)
+ *   - Self-maintenance: provider programs (bw, op, clis.js) only for set-up providers – loaded when connecting, version
+ *     check and test run, Smart App Control recognised; kdbxweb version, HIBP reachability, online catalogue
+ *   - Import/export of every common format (io.js, formats.js), attachments, SSH keys, passkeys, website icons (cached
+ *     locally), generator rules per site, encrypted daily backups in Hostwerk's backup centre
  *   - AI: tools never see passwords (only names/users/addresses/check results)
  * Secrets of the provider configuration are sealed in the settings (core/secrets). Data stays where it always was:
  * settings.passwords and data/passwoerter.
@@ -17,9 +19,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { VaultStore, TYPES } = require('./store');
-const { PROVIDERS, runCli, IS_WIN, ensureArgon } = require('./providers');
+const { VaultStore, TYPES, hostOf } = require('./store');
+const { PROVIDERS, IS_WIN } = require('./providers');
+const { Clis } = require('./clis');
 const formats = require('./formats');
+const io = require('./io');
+const sshkey = require('./sshkey');
 const pwc = require('./crypto');
 const host = require('./host');
 const { T, N } = require('./i18n');
@@ -62,7 +67,10 @@ class PasswordManager {
     this.pairings = new Map(); // code -> { at }
     this.audits = new Map();   // id -> last check result (without secrets)
     this.catalog = null;
+    this.clis = new Clis(this);
     this.loadCatalog().catch(() => {});
+    // Verschlüsselte Sicherung der Hostwerk-Tresore: täglich, nur wenn sich die Datei geändert hat (14 Stände je Tresor)
+    if (!process.env.HW_TEST) this.timers.push(setInterval(() => { try { this.backupAll(); } catch { /* nächster Tag */ } }, 6 * 3600e3));
     if (!process.env.HW_TEST) this.timers.push(setInterval(() => this.loadCatalog({ online: true }).catch(() => {}), 24 * 3600000));
     for (const t of this.timers) if (t.unref) t.unref();
   }
@@ -70,7 +78,7 @@ class PasswordManager {
   generate(opts = {}) { return pwc.generate(opts); }
   strength(pw) { return pwc.strength(pw); }
   stop() { for (const t of this.timers) clearInterval(t); this.timers = []; for (const s of this.stores.values()) { try { s.lock(); } catch { /* ignore */ } } }
-  get cfg() { const s = this.ctx.settings.get(); if (!s.passwords) s.passwords = { instances: [], ext: [], autoLockMin: 15, audit: { hibp: true } }; if (!s.passwords.ext) s.passwords.ext = []; if (!s.passwords.instances) s.passwords.instances = []; if (!s.passwords.audit) s.passwords.audit = { hibp: true }; return s.passwords; }
+  get cfg() { const s = this.ctx.settings.get(); if (!s.passwords) s.passwords = { instances: [], ext: [], autoLockMin: 15, audit: { hibp: true }, clipboardSec: 30, icons: true }; if (!s.passwords.ext) s.passwords.ext = []; if (!s.passwords.instances) s.passwords.instances = []; if (!s.passwords.audit) s.passwords.audit = { hibp: true }; return s.passwords; }
   list() { return this.cfg.instances; }
   get(id) { const i = this.list().find((x) => x.id === id); if (!i) throw Object.assign(new Error(T('Vault not found')), { status: 404 }); return i; }
   save() { this.ctx.settings.save(); }
@@ -93,7 +101,7 @@ class PasswordManager {
   info(i) {
     const s = this.stores.get(i.id);
     const prov = PROVIDERS[i.type];
-    return { id: i.id, name: i.name, type: i.type, label: i.type === 'hostwerk' ? T('Hostwerk vault') : (prov && prov.label) || i.type, native: i.type === 'hostwerk' || !!(prov && prov.native), readonly: !!(prov && prov.readonly), locked: !s || s.locked(), exists: i.type === 'hostwerk' ? fs.existsSync(this.file(i.id)) : true, cfg: this.pubCfg(i), createdAt: i.createdAt, audit: this.audits.get(i.id) || null, default: this.cfg.defaultId === i.id, color: i.color || null };
+    return { id: i.id, name: i.name, type: i.type, label: i.type === 'hostwerk' ? T('Hostwerk vault') : (prov && prov.label) || i.type, native: i.type === 'hostwerk' || !!(prov && prov.native), readonly: !!(prov && prov.readonly), cli: (prov && prov.cli) || null, locked: !s || s.locked(), exists: i.type === 'hostwerk' ? fs.existsSync(this.file(i.id)) : true, cfg: this.pubCfg(i), createdAt: i.createdAt, audit: this.audits.get(i.id) || null, default: this.cfg.defaultId === i.id, color: i.color || null };
   }
   pubCfg(i) { const out = {}; for (const [k, v] of Object.entries(i.cfg || {})) out[k] = typeof v === 'string' && v.startsWith('enc:') ? '••••' : v; return out; }
   file(id) { return path.join(this.dir, `${id}.hwvault`); }
@@ -102,7 +110,7 @@ class PasswordManager {
     let s = this.stores.get(id);
     if (!s) {
       if (i.type === 'hostwerk') s = new VaultStore(this.file(id), { autoLockMin: this.cfg.autoLockMin ?? 15 });
-      else { const P = PROVIDERS[i.type]; if (!P) throw new Error(T('Unknown provider “{type}”', { type: i.type })); s = new P.cls(this.ctx, i); }
+      else { const P = PROVIDERS[i.type]; if (!P) throw new Error(T('Unknown provider “{type}”', { type: i.type })); s = new P.cls(this.ctx, i, this); }
       this.stores.set(id, s);
     }
     return s;
@@ -119,7 +127,11 @@ class PasswordManager {
     this.save();
     if (type === 'hostwerk') { if (!b.password) throw new Error(T('The master password is missing.')); await this.store(id).create(b.password); }
     broadcast({ type: 'passwords' });
-    return this.info(inst);
+    const out = this.info(inst);
+    // Anbieter mit eigenem Programm: gleich beim Einrichten laden (Fortschritt als Auftrag) – bis zum Verbinden ist es da
+    const P = PROVIDERS[type];
+    if (P && P.cli && !(await this.clis.lookup(P.cli)) && !(this.clis.state[P.cli] || {}).installing) { try { out.cliJob = this.clis.install(P.cli).id; } catch { /* Verbinden bietet es erneut an */ } }
+    return out;
   }
   applyCfg(inst, cfg) {
     const P = PROVIDERS[inst.type];
@@ -145,7 +157,9 @@ class PasswordManager {
     }
     return this.removeNow(id, { deleteFile });
   }
-  async removeNow(id, { deleteFile = false } = {}) { const i = this.get(id); const s = this.stores.get(id); if (s && s.lock) s.lock(); this.stores.delete(id); this.cfg.instances = this.list().filter((x) => x.id !== id); if (this.cfg.defaultId === id) this.cfg.defaultId = (this.list()[0] || {}).id || null; this.save(); if (deleteFile && i.type === 'hostwerk') fs.rmSync(this.file(id), { force: true }); broadcast({ type: 'passwords' }); }
+  async removeNow(id, { deleteFile = false } = {}) { const i = this.get(id); const s = this.stores.get(id); if (s && s.lock) s.lock(); this.stores.delete(id); this.cfg.instances = this.list().filter((x) => x.id !== id); if (this.cfg.defaultId === id) this.cfg.defaultId = (this.list()[0] || {}).id || null; this.save(); if (deleteFile && i.type === 'hostwerk') { fs.rmSync(this.file(id), { force: true }); fs.rmSync(path.join(this.dir, `${id}.files`), { recursive: true, force: true }); fs.rmSync(this.backupDir(id), { recursive: true, force: true }); } broadcast({ type: 'passwords' }); }
+  /** Nach einem neuen Anbieter-Programm: offene Verbindungen dieser Anbieter schließen (nächster Zugriff verbindet neu). */
+  relock(types) { for (const i of this.list()) if (types.includes(i.type)) { const s = this.stores.get(i.id); if (s && s.lock) s.lock(); } broadcast({ type: 'passwords' }); }
 
   async unlock(id, password) { const i = this.get(id); const s = this.store(id); const r = i.type === 'hostwerk' ? await s.unlock(password) : await s.connect({ password }); broadcast({ type: 'passwords' }); return { ok: true, ...(r || {}) }; }
   lock(id) { const s = this.stores.get(id); if (s) s.lock(); broadcast({ type: 'passwords' }); }
@@ -158,11 +172,30 @@ class PasswordManager {
     if (s.locked()) throw Object.assign(new Error(T('{name} is not connected – please unlock.', { name: i.name })), { status: 423 });
     const all = await s.all();
     const n = String(q.q || '').toLowerCase();
-    return all.filter((x) => !x.trashed && (!q.folder || x.folder === q.folder) && (!q.type || x.type === q.type) && (!n || `${x.name} ${x.username || ''} ${(x.urls || []).join(' ')}`.toLowerCase().includes(n))).map(({ password, totp, notes, fields, ...rest }) => ({ ...rest, hasPassword: !!password, hasTotp: !!totp, hasNotes: !!notes, fieldCount: (fields || []).length })).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+    const yes = (x) => x === true || x === '1' || x === 'true';
+    if (yes(q.trashed)) return [];
+    return all.filter((x) => !x.trashed && (!q.folder || x.folder === q.folder || String(x.folder || '').startsWith(`${q.folder}/`)) && (!q.type || x.type === q.type) && (!q.tag || (x.tags || []).includes(q.tag)) && (!yes(q.fav) || x.favorite) && (!q.has || (q.has === 'totp' ? !!x.totp : q.has === 'passkey' ? (x.passkeys || []).length > 0 : q.has === 'files' ? false : true)) && (!n || `${x.name} ${x.username || ''} ${(x.urls || []).join(' ')}`.toLowerCase().includes(n)))
+      .map(({ password, totp, notes, fields, passkeys, ...rest }) => ({ ...rest, hasPassword: !!password, hasTotp: !!totp, hasNotes: !!notes, fieldCount: (fields || []).length, passkeyCount: (passkeys || []).length, pwScore: password ? pwc.strength(password).score : null, host: hostOf((rest.urls || [])[0] || '') || null })).sort((a, b) => (b.favorite - a.favorite) || a.name.localeCompare(b.name, 'de'));
   }
-  async item(id, itemId) { const i = this.get(id); const s = this.store(id); if (i.type !== 'hostwerk' && s.locked()) throw Object.assign(new Error(T('Not connected')), { status: 423 }); const it = await s.get(itemId); this.record(`${i.name}: ${it.name}`, T('Item viewed (secret retrieved)')); return it; }
-  async addItem(id, b) { const i = this.get(id); const s = this.store(id); if (PROVIDERS[i.type] && PROVIDERS[i.type].readonly) throw new Error(T('This provider is read-only.')); const it = await s.add(b); broadcast({ type: 'passwords', id }); return i.type === 'hostwerk' ? s.pub(it) : it; }
-  async updateItem(id, itemId, b) { const i = this.get(id); const s = this.store(id); if (PROVIDERS[i.type] && PROVIDERS[i.type].readonly) throw new Error(T('This provider is read-only.')); const it = await s.update(itemId, b); broadcast({ type: 'passwords', id }); return i.type === 'hostwerk' ? s.pub(it) : it; }
+  /** Zahlen für die Navigation (Alle, Favoriten, je Art, Passkeys, Anhänge, Papierkorb, Ordner, Schlagwörter). */
+  async stats(id) {
+    const i = this.get(id); const s = this.store(id);
+    if (i.type === 'hostwerk') return s.stats();
+    if (s.locked()) throw Object.assign(new Error(T('{name} is not connected – please unlock.', { name: i.name })), { status: 423 });
+    const live = (await s.all()).filter((x) => !x.trashed);
+    const count = (fn) => live.filter(fn).length;
+    const folders = new Map(); const tags = new Map();
+    for (const x of live) { if (x.folder) folders.set(x.folder, (folders.get(x.folder) || 0) + 1); for (const t of x.tags || []) tags.set(t, (tags.get(t) || 0) + 1); }
+    return { all: live.length, fav: count((x) => x.favorite), ...Object.fromEntries(TYPES.map((t) => [t, count((x) => x.type === t)])), passkey: count((x) => (x.passkeys || []).length), files: 0, trash: 0, folders: [...folders].map(([name, n]) => ({ name, count: n })).sort((a, b) => a.name.localeCompare(b.name, 'de')), tags: [...tags].map(([name, n]) => ({ name, count: n })).sort((a, b) => b.count - a.count) };
+  }
+  /** Ein Eintrag mit Geheimnissen – private Schlüssel der Passkeys bleiben im Tresor (nur für Export/Übertragen). */
+  async item(id, itemId) { const i = this.get(id); const s = this.store(id); if (i.type !== 'hostwerk' && s.locked()) throw Object.assign(new Error(T('Not connected')), { status: 423 }); const it = await s.get(itemId); this.record(`${i.name}: ${it.name}`, T('Item viewed (secret retrieved)')); return { ...it, passkeys: (it.passkeys || []).map(({ keyValue, ...p }) => ({ ...p, hasKey: !!keyValue })), pwStrength: it.password ? pwc.strength(it.password) : null }; }
+  /** SSH-Einträge: öffentlichen Teil und Fingerabdruck aus dem privaten Schlüssel ableiten. */
+  prepItem(b) { if (b && b.type === 'ssh' && b.ssh && (b.ssh.privateKey || b.ssh.publicKey)) return { ...b, ssh: sshkey.describe(b.ssh) }; return b; }
+  async addItem(id, b) { const i = this.get(id); const s = this.store(id); if (PROVIDERS[i.type] && PROVIDERS[i.type].readonly) throw new Error(T('This provider is read-only.')); const it = await s.add(this.prepItem(b)); broadcast({ type: 'passwords', id }); return i.type === 'hostwerk' ? s.pub(it) : it; }
+  async updateItem(id, itemId, b) { const i = this.get(id); const s = this.store(id); if (PROVIDERS[i.type] && PROVIDERS[i.type].readonly) throw new Error(T('This provider is read-only.')); const it = await s.update(itemId, this.prepItem(b)); broadcast({ type: 'passwords', id }); return i.type === 'hostwerk' ? s.pub(it) : it; }
+  /** Nur Hostwerk-Tresore: Anhänge, Passkeys entfernen */
+  own(id) { const i = this.get(id); if (i.type !== 'hostwerk') throw Object.assign(new Error(T('Only for the Hostwerk vault.')), { status: 400 }); return this.store(id); }
   async removeItem(id, itemId, { hard = false } = {}) { const i = this.get(id); const s = this.store(id); if (i.type === 'hostwerk' && !hard) s.trash(itemId, true); else await s.remove(itemId); broadcast({ type: 'passwords', id }); }
   async allWithSecrets(id) { const i = this.get(id); const s = this.store(id); if (i.type === 'hostwerk') return s.all(); if (s.locked()) throw Object.assign(new Error(T('Not connected')), { status: 423 }); return (await s.all()).filter((x) => !x.trashed); }
 
@@ -183,7 +216,7 @@ class PasswordManager {
       if ((byPw.get(it.password) || []).length > 1) F(it, 'reused', T('Same password in {n} items', { n: byPw.get(it.password).length }), 'err');
       const changed = it.passwordChanged || it.updated || it.created;
       if (changed && Date.now() - changed > 365 * DAY) F(it, 'old', T('Not changed for {n} months', { n: Math.round((Date.now() - changed) / DAY / 30) }), 'info');
-      if (it.type === 'login' && !it.totp && (it.urls || []).some((u) => /(google|microsoft|apple|amazon|paypal|github|facebook|instagram|twitter|x\.com|bank|sparkasse|dkb|ing|comdirect|steam|discord|dropbox|cloudflare|hetzner|ionos|strato)/i.test(u))) F(it, 'no2fa', T('Important service without a saved 2FA (TOTP)'), 'warn');
+      if (it.type === 'login' && !it.totp && !(it.passkeys || []).length && (it.urls || []).some((u) => /(google|microsoft|apple|amazon|paypal|github|facebook|instagram|twitter|x\.com|bank|sparkasse|dkb|ing|comdirect|steam|discord|dropbox|cloudflare|hetzner|ionos|strato)/i.test(u))) F(it, 'no2fa', T('Important service without a saved 2FA (TOTP)'), 'warn');
       if (useHibp) {
         try { let n = checked.get(it.password); if (n === undefined) { n = await pwc.pwned(it.password); checked.set(it.password, n); } if (n > 0) { leaked++; F(it, 'leaked', T('Showed up in {n} data leaks – change it now', { n: N(n) }), 'err'); } } catch (e) { if (!findings.some((f) => f.kind === 'hibp-error')) findings.push({ kind: 'hibp-error', level: 'info', text: T('Leak check not possible: {msg}', { msg: e.message }), name: '', itemId: null }); break; }
       }
@@ -197,61 +230,163 @@ class PasswordManager {
   }
 
   /* ---------- import / export ---------- */
-  async importText(id, text, { folder = '', skipDuplicates = true } = {}) {
-    const parsed = formats.detectAndParse(text);
+  dupKey(x) { return `${(x.name || '').toLowerCase()}|${(x.username || '').toLowerCase()}|${((x.urls || [])[0] || '').toLowerCase()}`; }
+  /**
+   * Preview of an import file (any format, see io.parseInput): format, count, first items without secrets, how many are
+   * already in the vault (duplicates) and – for a general CSV – the columns with the guessed assignment.
+   */
+  async importPreview(id, payload = {}) {
+    let parsed;
+    try { parsed = await io.parseInput(payload); } catch (e) {
+      if (e.needsPassword) return { needsPassword: true, message: e.message };
+      if (e.needsMapping) return { needsMapping: true, head: e.head, mapping: formats.guessMapping(e.head), fields: formats.MAP_FIELDS, message: e.message };
+      throw e;
+    }
+    let duplicates = null;
+    try { const have = new Set((await this.allWithSecrets(id)).map((x) => this.dupKey(x))); duplicates = parsed.items.filter((x) => have.has(this.dupKey(x))).length; } catch { /* gesperrt */ }
+    const counts = {}; for (const x of parsed.items) counts[x.type] = (counts[x.type] || 0) + 1;
+    return { format: parsed.format, label: parsed.label, count: parsed.items.length, counts, duplicates, head: parsed.head || null, mapping: parsed.mapping || null, fields: formats.MAP_FIELDS,
+      sample: parsed.items.slice(0, 8).map((x) => ({ name: x.name, username: x.username || '', type: x.type, url: (x.urls || [])[0] || '', folder: x.folder || '', hasPassword: !!x.password, hasTotp: !!x.totp, passkeys: (x.passkeys || []).length })) };
+  }
+  /** Take over an import file – duplicates (name + user + address) are skipped unless wanted. */
+  async importFile(id, payload = {}, { folder = '', skipDuplicates = true } = {}) {
+    const parsed = await io.parseInput(payload);
     const i = this.get(id); const s = this.store(id);
-    const existing = await this.allWithSecrets(id);
-    const key = (x) => `${(x.name || '').toLowerCase()}|${(x.username || '').toLowerCase()}|${((x.urls || [])[0] || '').toLowerCase()}`;
-    const have = new Set(existing.map(key));
-    const fresh = parsed.items.filter((x) => !skipDuplicates || !have.has(key(x))).map((x) => ({ ...x, folder: folder || x.folder }));
+    const have = new Set((await this.allWithSecrets(id)).map((x) => this.dupKey(x)));
+    const fresh = parsed.items.filter((x) => !skipDuplicates || !have.has(this.dupKey(x))).map((x) => this.prepImport({ ...x, folder: folder || x.folder }));
     let added = 0;
     if (i.type === 'hostwerk') { s.addMany(fresh); added = fresh.length; } else { for (const x of fresh) { await s.add(x); added++; } }
     broadcast({ type: 'passwords', id });
     this.record(i.name, T('{n} items imported ({label})', { n: added, label: parsed.label }));
     return { format: parsed.format, label: parsed.label, found: parsed.items.length, added, skipped: parsed.items.length - fresh.length };
   }
-  async exportText(id, kind = 'bitwarden-json') {
-    const i = this.get(id);
-    const items = await this.allWithSecrets(id);
-    this.record(i.name, T('Export ({kind}, {n} items)', { kind, n: items.length }));
-    if (kind === 'bitwarden-json') return { text: formats.exportBitwardenJson(items, [...new Set(items.map((x) => x.folder).filter(Boolean))]), name: `${i.name}.json`, mime: 'application/json' };
-    return { text: formats.exportCsv(items, kind.replace('-csv', '')), name: `${i.name}-${kind}.csv`, mime: 'text/csv' };
-  }
+  /** SSH-Schlüssel aus Importen ergänzen (öffentlicher Teil, Fingerabdruck) – unlesbare bleiben, wie sie sind. */
+  prepImport(x) { if (x.type === 'ssh' && x.ssh && x.ssh.privateKey && !x.ssh.publicKey) { try { return { ...x, ssh: sshkey.describe(x.ssh) }; } catch { return x; } } return x; }
+  /** Compatibility: plain text (CSV/JSON) as before. */
+  importText(id, text, opts = {}) { return this.importFile(id, { text }, opts); }
+
   /**
-   * KeePass-Datei (.kdbx, KDBX 4 mit Argon2id) mit eigenem Passwort – Ordner werden Gruppen, 2FA-Geheimnis als „otp“,
-   * eigene Felder bleiben (geheime geschützt). Gelöschte Einträge (Papierkorb) kommen nicht mit.
+   * Export. Encrypted: "kdbx" (KeePass, own password) and "bitwarden-encrypted" (Bitwarden JSON with password).
+   * Unencrypted (bitwarden-json, *-csv) only with plain: true – the interface asks with a clear warning first.
    */
-  async exportKdbx(id, password) {
+  async exportFile(id, { kind = 'bitwarden-json', password = '', plain = false } = {}) {
     const i = this.get(id);
-    if (typeof password !== 'string' || password.length < 8) throw Object.assign(new Error(T('The password for the KeePass file needs at least 8 characters.')), { status: 400 });
-    const kdbx = host.lib('kdbxweb');
-    ensureArgon();
     const items = (await this.allWithSecrets(id)).filter((x) => !x.trashed);
-    const db = kdbx.Kdbx.create(new kdbx.Credentials(kdbx.ProtectedValue.fromString(password)), i.name);
-    const P = (s) => kdbx.ProtectedValue.fromString(String(s || ''));
-    const groups = new Map([['', db.getDefaultGroup()]]);
-    const groupFor = (folder) => {
-      const parts = String(folder || '').split('/').map((x) => x.trim()).filter(Boolean);
-      let key = ''; let g = db.getDefaultGroup();
-      for (const p of parts) { key = key ? `${key}/${p}` : p; if (!groups.has(key)) groups.set(key, db.createGroup(g, p)); g = groups.get(key); }
-      return g;
-    };
-    for (const it of items) {
-      const e = db.createEntry(groupFor(it.folder));
-      e.fields.set('Title', it.name || '');
-      e.fields.set('UserName', it.username || '');
-      e.fields.set('Password', P(it.password));
-      e.fields.set('URL', (it.urls || [])[0] || '');
-      const notes = [it.notes || '', ...(it.urls || []).slice(1).map((u) => `URL: ${u}`), it.card ? `${T('Card')}: ${it.card.number || ''} ${it.card.expiry || ''}`.trim() : ''].filter(Boolean).join('\n');
-      e.fields.set('Notes', notes);
-      if (it.totp) e.fields.set('otp', P(it.totp));
-      for (const f of it.fields || []) if (f && f.name && !['Title', 'UserName', 'Password', 'URL', 'Notes', 'otp'].includes(f.name)) e.fields.set(String(f.name), f.hidden ? P(f.value) : String(f.value || ''));
-      e.tags = Array.isArray(it.tags) ? it.tags : [];
-    }
-    const data = Buffer.from(await db.save());
-    this.record(i.name, T('Export ({kind}, {n} items)', { kind: 'kdbx', n: items.length }));
-    return { data, name: `${i.name}.kdbx`, mime: 'application/octet-stream' };
+    const enc = kind === 'kdbx' || kind === 'bitwarden-encrypted';
+    if (enc && (typeof password !== 'string' || password.length < 8)) throw Object.assign(new Error(T('The password for the export file needs at least 8 characters.')), { status: 400 });
+    if (!enc && plain !== true) throw Object.assign(new Error(T('Unencrypted exports contain every password in plain text – please confirm first.')), { status: 428 });
+    this.record(i.name, T(enc ? 'Encrypted export ({kind}, {n} items)' : 'Export ({kind}, {n} items)', { kind, n: items.length }));
+    if (kind === 'kdbx') return { data: await io.writeKdbx(items, password, i.name), name: `${i.name}.kdbx`, mime: 'application/octet-stream' };
+    if (kind === 'bitwarden-encrypted') return { data: Buffer.from(await io.bitwardenEncrypted(items, password)), name: `${i.name}-bitwarden-encrypted.json`, mime: 'application/json' };
+    if (kind === 'bitwarden-json') return { data: Buffer.from(formats.exportBitwardenJson(items, [...new Set(items.map((x) => x.folder).filter(Boolean))])), name: `${i.name}.json`, mime: 'application/json' };
+    if (!/^(bitwarden|chrome|keepass|generic)-csv$/.test(kind)) throw Object.assign(new Error(T('Unknown export format')), { status: 400 });
+    return { data: Buffer.from(formats.exportCsv(items, kind.replace('-csv', ''))), name: `${i.name}-${kind}.csv`, mime: 'text/csv' };
   }
+  /** Compatibility (1.x): text export / KeePass file. */
+  async exportText(id, kind = 'bitwarden-json') { const r = await this.exportFile(id, { kind, plain: true }); return { text: r.data.toString('utf8'), name: r.name, mime: r.mime }; }
+  exportKdbx(id, password) { return this.exportFile(id, { kind: 'kdbx', password }); }
+
+  /* ---------- encrypted backups (backup centre) ---------- */
+  backupDir(id) { return path.join(this.dir, 'sicherungen', id); }
+  /** Copy of the (already encrypted) vault file + attachments, when it changed since the last copy. 14 stay. */
+  backupVault(id, { force = false } = {}) {
+    const f = this.file(id);
+    if (!fs.existsSync(f)) return null;
+    const dir = this.backupDir(id);
+    fs.mkdirSync(dir, { recursive: true });
+    const mtime = fs.statSync(f).mtimeMs;
+    const have = fs.readdirSync(dir).filter((x) => /^\d+\.hwvault$/.test(x)).sort();
+    if (!force && have.length && Number(have[have.length - 1].split('.')[0]) >= mtime) return null;
+    const t = Date.now();
+    fs.copyFileSync(f, path.join(dir, `${t}.hwvault`));
+    const files = path.join(this.dir, `${id}.files`);
+    if (fs.existsSync(files)) fs.cpSync(files, path.join(dir, `${t}.files`), { recursive: true });
+    for (const old of fs.readdirSync(dir).filter((x) => /^\d+\.hwvault$/.test(x)).sort().slice(0, -14)) { const n = old.split('.')[0]; fs.rmSync(path.join(dir, old), { force: true }); fs.rmSync(path.join(dir, `${n}.files`), { recursive: true, force: true }); }
+    return t;
+  }
+  backupAll() { for (const i of this.list()) if (i.type === 'hostwerk') this.backupVault(i.id); }
+  /** Source for Hostwerk's backup centre (SDK 2.10, host.backups.register) – list, restore, remove, external backup. */
+  backupSource() {
+    const parse = (itemId) => { const m = String(itemId).match(/^([a-z]+-[0-9a-f]{6})~(\d+)$/); if (!m) throw Object.assign(new Error(T('Backup not found')), { status: 404 }); const f = path.join(this.backupDir(m[1]), `${m[2]}.hwvault`); if (!fs.existsSync(f)) throw Object.assign(new Error(T('Backup not found')), { status: 404 }); return { id: m[1], t: Number(m[2]), f }; };
+    return {
+      label: { de: 'Passwort-Tresore', en: 'Password vaults' },
+      list: () => this.list().filter((i) => i.type === 'hostwerk').flatMap((i) => { const dir = this.backupDir(i.id); if (!fs.existsSync(dir)) return []; return fs.readdirSync(dir).filter((x) => /^\d+\.hwvault$/.test(x)).map((x) => { const t = Number(x.split('.')[0]); return { id: `${i.id}~${t}`, label: T('{name} (encrypted)', { name: i.name }), t, size: fs.statSync(path.join(dir, x)).size, auto: true, svc: i.id, svcName: i.name, href: `#/ext/passwords/${i.id}` }; }); }),
+      restore: async (itemId) => {
+        const b = parse(itemId);
+        this.backupVault(b.id, { force: true }); // aktuellen Stand vorher sichern – wie alle Wege der Sicherungs-Zentrale
+        const s = this.stores.get(b.id); if (s) s.lock();
+        const target = this.file(b.id);
+        fs.copyFileSync(b.f, target + '.zurueck'); fs.renameSync(target + '.zurueck', target);
+        const files = path.join(this.dir, `${b.id}.files`); const saved = path.join(this.backupDir(b.id), `${b.t}.files`);
+        fs.rmSync(files, { recursive: true, force: true }); if (fs.existsSync(saved)) fs.cpSync(saved, files, { recursive: true });
+        this.record(this.get(b.id).name, T('Vault restored from the backup of {date}', { date: new Date(b.t).toLocaleString('de-DE') }));
+        broadcast({ type: 'passwords' });
+        return { ok: true };
+      },
+      remove: (itemId) => { const b = parse(itemId); fs.rmSync(b.f, { force: true }); fs.rmSync(path.join(this.backupDir(b.id), `${b.t}.files`), { recursive: true, force: true }); },
+      // Externe Sicherung: jeweils der neueste Stand je Tresor (bleibt verschlüsselt – ohne Master-Passwort nutzlos)
+      offsite: ({ dir }) => { const out = []; for (const i of this.list()) if (i.type === 'hostwerk' && fs.existsSync(this.file(i.id))) { const d = path.join(dir, `passwoerter-${i.id}.hwvault`); fs.copyFileSync(this.file(i.id), d); out.push(d); } return out; },
+    };
+  }
+
+  /* ---------- website icons (cached locally) ---------- */
+  iconDir() { return path.join(this.dir, 'symbole'); }
+  /**
+   * Icon of a website for the list: page → <link rel="icon">, otherwise /favicon.ico. Cached for 30 days (misses 7 days),
+   * only public host names (no IP addresses, no local names), at most 200 KB, only real image formats.
+   */
+  async siteIcon(h) {
+    const hostName = String(h || '').toLowerCase();
+    if (this.cfg.icons === false) return null;
+    if (!/^(?=.{4,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,63}$/.test(hostName) || /\.(local|lan|home|internal|localhost|test|arpa)$/.test(hostName)) return null;
+    const dir = this.iconDir(); fs.mkdirSync(dir, { recursive: true });
+    const base = path.join(dir, hostName);
+    for (const ext of ['png', 'ico', 'svg', 'jpg', 'gif', 'webp']) { const f = `${base}.${ext}`; if (fs.existsSync(f) && Date.now() - fs.statSync(f).mtimeMs < 30 * 864e5) return f; }
+    if (fs.existsSync(`${base}.none`) && Date.now() - fs.statSync(`${base}.none`).mtimeMs < 7 * 864e5) return null;
+    // Nur öffentliche Adressen (auch nach Weiterleitungen und DNS) – kein Zugriff aufs Heimnetz über einen Namen
+    const isPrivate = (ip) => /^(127\.|10\.|192\.168\.|169\.254\.|0\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) || /^(::1?$|f[cd]|fe80:|::ffff:(127|10|192\.168)\.)/i.test(ip);
+    const safeHost = async (h2) => { try { const all = await require('dns').promises.lookup(h2, { all: true }); return all.length > 0 && !all.some((a) => isPrivate(a.address)); } catch { return false; } };
+    const get = async (url, max) => {
+      let u = url;
+      for (let hop = 0; hop < 4; hop++) {
+        const p = new URL(u);
+        if (p.protocol !== 'https:' || !(await safeHost(p.hostname))) return null;
+        const r = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(6000), headers: { 'User-Agent': 'Mozilla/5.0 Hostwerk' } });
+        if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { u = new URL(r.headers.get('location'), u).href; continue; }
+        if (!r.ok) return null;
+        const buf = Buffer.from(await r.arrayBuffer());
+        return buf.length <= max ? buf : null;
+      }
+      return null;
+    };
+    const kind = (b) => (!b || b.length < 8 ? null : b[0] === 0x89 && b[1] === 0x50 ? 'png' : b[0] === 0 && b[1] === 0 && b[2] === 1 ? 'ico' : b[0] === 0xff && b[1] === 0xd8 ? 'jpg' : b.subarray(0, 3).toString() === 'GIF' ? 'gif' : b.subarray(8, 12).toString() === 'WEBP' ? 'webp' : /<svg[\s>]/i.test(b.subarray(0, 600).toString('utf8')) ? 'svg' : null);
+    const cands = [];
+    try {
+      const html = (await get(`https://${hostName}/`, 600 * 1024) || Buffer.alloc(0)).toString('utf8');
+      for (const m of html.matchAll(/<link\b[^>]*>/gi)) { const tag = m[0]; if (!/rel\s*=\s*["']?[^"'>]*\bicon\b/i.test(tag)) continue; const href = (tag.match(/href\s*=\s*["']([^"']+)["']/i) || [])[1]; if (href) { try { cands.push(new URL(href, `https://${hostName}/`).href); } catch { /* ungültig */ } } }
+    } catch { /* Seite nicht erreichbar */ }
+    cands.push(`https://${hostName}/favicon.ico`);
+    for (const u of cands.slice(0, 5)) {
+      if (!/^https:\/\//.test(u)) continue;
+      try { const b = await get(u, 200 * 1024); const k = kind(b); if (k) { const f = `${base}.${k}`; fs.writeFileSync(f, b); return f; } } catch { /* nächste */ }
+    }
+    fs.writeFileSync(`${base}.none`, '');
+    return null;
+  }
+
+  /* ---------- generator rules per site ---------- */
+  get genRules() { if (!this.cfg.genRules || typeof this.cfg.genRules !== 'object') this.cfg.genRules = {}; return this.cfg.genRules; }
+  setGenRule(site, opts) {
+    const h = hostOf(String(site || '')).replace(/^www\./, '');
+    if (!h) throw Object.assign(new Error(T('Please enter a website address.')), { status: 400 });
+    if (opts === null) { delete this.genRules[h]; this.save(); return this.genRules; }
+    const o = opts || {};
+    this.genRules[h] = { length: Math.max(6, Math.min(128, Number(o.length) || 20)), lower: o.lower !== false, upper: o.upper !== false, digits: o.digits !== false, symbols: !!o.symbols, words: Math.max(0, Math.min(10, Number(o.words) || 0)) };
+    this.save();
+    return this.genRules;
+  }
+  /** Generator options for an address: the rule of the site (also for subdomains), otherwise the given ones. */
+  genFor(url, fallback = {}) { const h = hostOf(String(url || '')).replace(/^www\./, ''); const key = h && Object.keys(this.genRules).find((k) => h === k || h.endsWith(`.${k}`)); return key ? { ...this.genRules[key], site: key } : fallback; }
 
   /**
    * Tresor als Dienst für andere Erweiterungen (host.use('passwordVault')): Dateifreigabe, Mailserver, Router,
@@ -530,84 +665,66 @@ class PasswordManager {
     return { ok: true, browser, mode: 'dev', opened, since: Date.now(), autoPair: true, dir: fx ? null : target, file: fx ? target : null, url: url || null };
   }
 
-  /* ---------- self-maintenance: CLIs and packages ---------- */
-  cliDir(name) { return path.join(this.ctx.paths.bin, `pw-${name}`); }
-  cliPath(name) { const d = this.cliDir(name); const exe = path.join(d, IS_WIN ? `${name}.exe` : name); if (fs.existsSync(exe)) return exe; return this.cliFound && this.cliFound[name] ? this.cliFound[name] : null; }
+  /* ---------- self-maintenance: provider programs (clis.js) and packages ---------- */
+  /** Compatibility (1.x): path of a provider program or null. */
+  cliPath(name) { return this.clis.path(name); }
   kdbxwebVersion() { try { return readJson(path.join(host.appRoot() || '', 'node_modules', 'kdbxweb', 'package.json'), {}).version || null; } catch { return null; } }
   async cliStatus() {
-    this.cliFound = this.cliFound || {};
     const out = {};
-    for (const name of ['bw', 'op']) {
-      if (!this.cliFound[name]) this.cliFound[name] = await host.core('platform').which(name);
-      const exe = this.cliPath(name);
-      let version = null;
-      if (exe) { const r = await runCli(exe, ['--version'], { timeout: 15000 }); version = (r.out || r.err).trim().split('\n')[0].replace(/^v/, '') || null; }
-      out[name] = { installed: !!exe, path: exe, version, latest: null };
-    }
+    for (const name of ['bw', 'op']) out[name] = await this.clis.status(name);
     const kv = this.kdbxwebVersion();
     out.kdbxweb = kv ? { installed: true, version: kv } : { installed: false };
     return out;
   }
-  async latestCli(name) {
-    const { fetchJson, cached } = host.core('download');
-    const cat = (this.catalog && this.catalog.clis) || {};
-    if (name === 'bw') {
-      const rels = await cached('pw-bw-rel', 3600e3, () => fetchJson('https://api.github.com/repos/bitwarden/clients/releases?per_page=30'));
-      const rel = rels.find((r) => /^cli-v/.test(r.tag_name) && !r.prerelease);
-      if (!rel) throw new Error(T('No CLI version found'));
-      const version = rel.tag_name.replace(/^cli-v/, '');
-      const asset = rel.assets.find((a) => new RegExp(`^bw-(oss-)?${IS_WIN ? 'windows' : 'linux'}-${version.replace(/\./g, '\\.')}\\.zip$`).test(a.name)) || rel.assets.find((a) => a.name.includes(IS_WIN ? 'windows' : 'linux') && a.name.endsWith('.zip'));
-      return { version, url: asset && asset.browser_download_url, page: rel.html_url };
-    }
-    if (name === 'op') {
-      const j = await cached('pw-op-rel', 3600e3, () => fetchJson(cat.opCheck || 'https://app-updates.agilebits.com/check/1/0/CLI2/en/2.0.0/N'));
-      const version = String(j.version || '').replace(/^v/, '');
-      const base = cat.opBase || 'https://cache.agilebits.com/dist/1P/op2/pkg';
-      return { version, url: `${base}/v${version}/op_${IS_WIN ? 'windows' : 'linux'}_amd64_v${version}.zip`, page: 'https://developer.1password.com/docs/cli/' };
-    }
-    throw new Error(T('Unknown CLI'));
-  }
-  installCli(name) {
-    const label = name === 'bw' ? 'Bitwarden CLI' : '1Password CLI';
-    return host.core('jobs').runJob(T('Download {label}', { label }), async (job) => {
-      const l = await this.latestCli(name);
-      if (!l.url) throw new Error(T('No download found for this system: {page}', { page: l.page || '' }));
-      const dir = this.cliDir(name);
-      const dl = host.core('download');
-      const r = await this.ctx.keeper.attempt(`pw-cli-${name}`, {
-        label: T('Password manager: {label}', { label }), version: l.version, present: () => !!this.cliPath(name),
-        install: async () => { const tmp = dir + '.neu'; fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true }); const zip = path.join(this.ctx.paths.cache, `${name}-${l.version}.zip`); await dl.downloadFile(l.url, zip, { onProgress: (a, b) => job.progress(b ? (a / b) * 80 : 40, T('Downloading {name} {version}', { name, version: l.version })) }); await dl.extractZip(zip, tmp); fs.rmSync(zip, { force: true }); const exe = path.join(tmp, IS_WIN ? `${name}.exe` : name); if (!fs.existsSync(exe)) { const found = fs.readdirSync(tmp).find((f) => f === name || f === `${name}.exe`); if (!found) throw new Error(T('Program not found in the archive')); } if (!IS_WIN) fs.chmodSync(exe, 0o755); return { tmp, exe }; },
-        probe: async ({ exe }) => { const t = await host.core('sac').probe(exe, ['--version']); if (!t.ok) throw new Error(t.blocked ? T('Smart App Control blocks the program.') : T('Does not start: {out}', { out: t.output.slice(0, 200) })); if (!t.output.includes(l.version.split('.')[0])) job.log(T('Version according to the program: {v}', { v: t.output.trim() })); },
-        activate: async ({ tmp }) => { fs.rmSync(dir, { recursive: true, force: true }); fs.renameSync(tmp, dir); for (const s of this.stores.values()) if (s.lock) s.lock(); },
-        discard: async (x) => { if (x && x.tmp) fs.rmSync(x.tmp, { recursive: true, force: true }); },
-      });
-      if (!r.ok) throw new Error(r.error || T('Test run failed'));
-      return { version: l.version, path: this.cliPath(name) };
-    }, { key: 'pw-cli-' + name });
-  }
-  /** Keeper check: new CLI versions (with auto-update when installed), kdbxweb on npm, HIBP, catalogue. */
+  installCli(name, opts) { return this.clis.install(name, opts); }
+  /**
+   * Keeper check (daily): provider programs only for set-up providers (clis.check), kdbxweb on npm and the leak check
+   * only when there is a vault at all, the catalogue always.
+   */
   async check() {
     const { fetchJson, cached, cmpVersion } = host.core('download');
-    const st = await this.cliStatus();
-    const out = { clis: {}, kdbxweb: st.kdbxweb };
-    for (const name of ['bw', 'op']) {
-      const label = T('Password manager: {name} CLI', { name });
-      try {
-        const l = await this.latestCli(name); out.clis[name] = { ...st[name], latest: l.version };
-        if (st[name].installed && st[name].version && l.version && cmpVersion(l.version, st[name].version) > 0 && this.cliPath(name).startsWith(this.cliDir(name))) await this.installCli(name).promise.catch(() => {});
-        this.note(`pw-cli-${name}-check`, true, label, st[name].installed ? T('installed {v}, current {latest}', { v: st[name].version, latest: l.version }) : T('not installed (current {latest})', { latest: l.version }));
-      } catch (e) { out.clis[name] = { ...st[name], error: e.message }; this.note(`pw-cli-${name}-check`, false, label, T('Version check failed: {msg}', { msg: e.message })); }
+    const out = { clis: await this.clis.check() };
+    if (this.list().length) {
+      const kv = this.kdbxwebVersion();
+      out.kdbxweb = kv ? { installed: true, version: kv } : { installed: false };
+      try { const npm = await cached('pw-kdbxweb-npm', 3600e3, () => fetchJson('https://registry.npmjs.org/kdbxweb/latest')); out.kdbxweb.latest = npm.version; this.note('pw-kdbxweb', true, T('Password manager: KeePass library (kdbxweb)'), cmpVersion(npm.version, kv) > 0 ? T('built in {v}, on npm {npm} – the newer version comes with the next Hostwerk update (Dependabot)', { v: kv, npm: npm.version }) : T('built in {v}, on npm {npm}', { v: kv, npm: npm.version })); } catch (e) { out.kdbxweb.error = e.message; }
+      if (this.cfg.audit.hibp !== false) { const hibpLabel = T('Password manager: leak check (HIBP)'); try { await pwc.pwned('Hostwerk-Probe'); this.note('pw-hibp', true, hibpLabel, T('reachable')); } catch (e) { this.note('pw-hibp', false, hibpLabel, e.message); } }
     }
-    try { const npm = await cached('pw-kdbxweb-npm', 3600e3, () => fetchJson('https://registry.npmjs.org/kdbxweb/latest')); out.kdbxweb.latest = npm.version; this.note('pw-kdbxweb', true, T('Password manager: KeePass library (kdbxweb)'), cmpVersion(npm.version, st.kdbxweb.version) > 0 ? T('built in {v}, on npm {npm} – the newer version comes with the next Hostwerk update (Dependabot)', { v: st.kdbxweb.version, npm: npm.version }) : T('built in {v}, on npm {npm}', { v: st.kdbxweb.version, npm: npm.version })); } catch (e) { out.kdbxweb.error = e.message; }
-    const hibpLabel = T('Password manager: leak check (HIBP)');
-    try { await pwc.pwned('Hostwerk-Probe'); this.note('pw-hibp', true, hibpLabel, T('reachable')); } catch (e) { this.note('pw-hibp', false, hibpLabel, e.message); }
     await this.loadCatalog({ online: true }).catch(() => {});
     return out;
   }
 
+  /**
+   * SSH-Schlüssel aus dem Tresor an Hostwerks SSH-Schlüssel übergeben (Ordner ~/.ssh): Datei + .pub, nur für den
+   * Benutzer lesbar, vorhandene Dateien werden nie überschrieben. Danach steht er unter Hostwerk → SSH-Schlüssel.
+   */
+  async sshInstall(id, itemId, name) {
+    const it = await this.store(id).get(itemId);
+    if (it.type !== 'ssh' || !it.ssh || !it.ssh.privateKey) throw Object.assign(new Error(T('This item has no SSH private key.')), { status: 400 });
+    const dir = (this.ctx.sshKeys && this.ctx.sshKeys.dir) || path.join(require('os').homedir(), '.ssh');
+    const slug = String(it.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'hostwerk';
+    const n = String(name || '').trim() || `id_${String(it.ssh.keyType || 'key').replace(/^ssh-/, '').replace(/[^\w]/g, '')}_${slug}`;
+    if (!/^[\w.-]{1,60}$/.test(n) || n.endsWith('.pub')) throw Object.assign(new Error(T('Please use a simple file name (letters, digits, . _ -).')), { status: 400 });
+    const file = path.join(dir, n);
+    if (fs.existsSync(file) || fs.existsSync(file + '.pub')) throw Object.assign(new Error(T('A key “{name}” already exists – please choose another name.', { name: n })), { status: 409 });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, it.ssh.privateKey.endsWith('\n') ? it.ssh.privateKey : it.ssh.privateKey + '\n', { mode: 0o600, flag: 'wx' });
+    if (it.ssh.publicKey) fs.writeFileSync(file + '.pub', it.ssh.publicKey.trim() + '\n', { mode: 0o644, flag: 'wx' });
+    this.record(`${this.get(id).name}: ${it.name}`, T('SSH key handed to Hostwerk ({file})', { file: n }));
+    return { ok: true, name: n, path: file };
+  }
+
   /* ---------- routes ---------- */
   routes(r) {
-    const J = (fn) => async (req, res) => res.json(await fn(req, res));
+    // Fehler mit Handlungs-Code (Programm laden, Smart App Control, Passwort nötig) gehen samt Erklärung an die Oberfläche
+    const J = (fn) => async (req, res, next) => {
+      try { res.json(await fn(req, res)); } catch (e) {
+        if (e && (e.pwCode || e.needsPassword) && !res.headersSent) return res.status(e.status || 409).json({ error: e.message, code: e.pwCode || 'PW_NEEDS_PASSWORD', hint: e.hint || undefined });
+        return next(e);
+      }
+      return undefined;
+    };
+    const send = (res, f) => { res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(f.name)}"`); res.setHeader('Cache-Control', 'no-store'); res.type(f.mime); res.send(f.data); };
     // Members: only what is shared with them (before /pw/:id, so "shared" is no vault id)
     const me = (req) => { const s = this.ctx.remote && this.ctx.remote.session ? this.ctx.remote.session(req) : null; return s && s.userId ? this.members().find((x) => x.id === s.userId) : null; };
     r.get('/pw/shared/mine', J(async (req) => { const u = me(req); return { member: !!u, name: u ? u.name : null, items: u ? await this.sharedWith(u.id) : [] }; }));
@@ -615,15 +732,29 @@ class PasswordManager {
     r.get('/pw/:id/items/:item/share', J(async (req) => ({ users: this.getShare(req.params.id, req.params.item), until: this.getShareUntil(req.params.id, req.params.item), members: this.members().filter((u) => u.role !== 'admin' && u.enabled !== false).map((u) => ({ id: u.id, name: u.name })) })));
     r.put('/pw/:id/items/:item/share', J(async (req) => this.setShare(req.params.id, req.params.item, (req.body || {}).users, (req.body || {}).until)));
     r.get('/pw/browsers', J(async () => host.core('browsers').detectBrowsers()));
-    r.get('/pw', J(async () => ({ autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), instances: this.list().map((i) => this.info(i)), providers: Object.entries(PROVIDERS).filter(([, p]) => !(p.linux && IS_WIN)).map(([id, p]) => ({ id, label: p.label, fields: p.fields, hint: p.hint, cli: p.cli || null, readonly: !!p.readonly })), catalog: this.catalog, formats: formats.allFormats().map((f) => ({ id: f.id, label: f.label })), ext: this.cfg.ext.map(({ hash, ...e }) => e), autoLockMin: this.cfg.autoLockMin ?? 15, hibp: this.cfg.audit.hibp !== false, defaultId: this.cfg.defaultId || null, types: TYPES, members: this.members().length > 0 }))); // eslint-disable-line no-unused-vars
-    r.put('/pw', (req, res) => { const b = req.body || {}; if (Number.isFinite(Number(b.autoLockMin))) { this.cfg.autoLockMin = Math.max(0, Math.min(240, Number(b.autoLockMin))); for (const s of this.stores.values()) if (s.autoLockMin !== undefined) s.autoLockMin = this.cfg.autoLockMin; } if (typeof b.hibp === 'boolean') this.cfg.audit.hibp = b.hibp; if (typeof b.autoLogin === 'boolean') this.cfg.autoLogin = b.autoLogin; if (b.autofill && typeof b.autofill === 'object') { const a = this.autofillCfg(); for (const k of ['inline', 'onLoad', 'suggest', 'offerSave']) if (typeof b.autofill[k] === 'boolean') a[k] = b.autofill[k]; } if (b.defaultId) this.cfg.defaultId = b.defaultId; this.save(); res.json({ ok: true }); });
+    r.get('/pw', J(async () => ({ autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), instances: this.list().map((i) => this.info(i)), providers: Object.entries(PROVIDERS).filter(([, p]) => !(p.linux && IS_WIN)).map(([id, p]) => ({ id, label: p.label, fields: p.fields, hint: p.hint, cli: p.cli || null, readonly: !!p.readonly })), catalog: this.catalog, formats: formats.allFormats().map((f) => ({ id: f.id, label: f.label })), ext: this.cfg.ext.map(({ hash, ...e }) => e), autoLockMin: this.cfg.autoLockMin ?? 15, hibp: this.cfg.audit.hibp !== false, defaultId: this.cfg.defaultId || null, types: TYPES, members: this.members().length > 0, cli: { bw: this.clis.quick('bw'), op: this.clis.quick('op') }, clipboardSec: this.cfg.clipboardSec ?? 30, icons: this.cfg.icons !== false, sshDir: (this.ctx.sshKeys && this.ctx.sshKeys.dir) || null }))); // eslint-disable-line no-unused-vars
+    r.put('/pw', (req, res) => { const b = req.body || {}; if (Number.isFinite(Number(b.autoLockMin))) { this.cfg.autoLockMin = Math.max(0, Math.min(240, Number(b.autoLockMin))); for (const s of this.stores.values()) if (s.autoLockMin !== undefined) s.autoLockMin = this.cfg.autoLockMin; } if (Number.isFinite(Number(b.clipboardSec))) this.cfg.clipboardSec = Math.max(0, Math.min(600, Number(b.clipboardSec))); if (typeof b.icons === 'boolean') this.cfg.icons = b.icons; if (typeof b.hibp === 'boolean') this.cfg.audit.hibp = b.hibp; if (typeof b.autoLogin === 'boolean') this.cfg.autoLogin = b.autoLogin; if (b.autofill && typeof b.autofill === 'object') { const a = this.autofillCfg(); for (const k of ['inline', 'onLoad', 'suggest', 'offerSave']) if (typeof b.autofill[k] === 'boolean') a[k] = b.autofill[k]; } if (b.defaultId) this.cfg.defaultId = b.defaultId; this.save(); res.json({ ok: true }); });
     r.post('/pw', J((req) => this.create(req.body || {})));
-    r.get('/pw/cli', J(async () => { const st = await this.cliStatus(); for (const n of ['bw', 'op']) { try { st[n].latest = (await this.latestCli(n)).version; } catch { /* offline */ } } return st; }));
-    r.post('/pw/cli/:name/install', (req, res) => { if (!['bw', 'op'].includes(req.params.name)) throw new Error(T('Unknown CLI')); res.json({ job: this.installCli(req.params.name).id }); });
-    r.post('/pw/generate', (req, res) => { const pw = pwc.generate(req.body || {}); res.json({ password: pw, strength: pwc.strength(pw) }); });
+    // Anbieter-Programme: Zustand (mit Version), aktuelle Version beim Hersteller nur für benötigte
+    r.get('/pw/cli', J(async () => { const st = await this.cliStatus(); for (const n of ['bw', 'op']) { if (!st[n].needed) continue; try { st[n].latest = (await this.clis.latest(n)).version; } catch { /* offline */ } } return st; }));
+    r.post('/pw/cli/:name/install', J(async (req) => { if (!['bw', 'op'].includes(req.params.name)) throw new Error(T('Unknown CLI')); return { job: this.installCli(req.params.name, { manual: true }).id }; }));
+    r.post('/pw/generate', (req, res) => { const b = req.body || {}; const opts = b.url ? this.genFor(b.url, b) : b; const pw = pwc.generate(opts); res.json({ password: pw, strength: pwc.strength(pw), rule: opts.site || null }); });
+    r.get('/pw/gen-rules', (req, res) => res.json(this.genRules));
+    r.put('/pw/gen-rules', J(async (req) => this.setGenRule((req.body || {}).site, (req.body || {}).opts === undefined ? {} : (req.body || {}).opts)));
     r.post('/pw/strength', (req, res) => res.json(pwc.strength((req.body || {}).password)));
     r.post('/pw/pwned', J(async (req) => ({ count: await pwc.pwned((req.body || {}).password || '') })));
     r.post('/pw/totp', (req, res) => res.json(pwc.totp((req.body || {}).secret || '') || { error: T('No valid secret') }));
+    r.post('/pw/ssh/generate', J(async (req) => sshkey.generate((req.body || {}).comment)));
+    r.post('/pw/ssh/describe', J(async (req) => sshkey.describe(req.body || {})));
+    // Symbol einer Webseite (lokal zwischengespeichert) – fehlt es, zeigt die Liste den Anfangsbuchstaben
+    r.get('/pw/icon/:host', async (req, res) => {
+      const f = await this.siteIcon(req.params.host).catch(() => null);
+      if (!f) return res.status(404).end();
+      res.setHeader('Cache-Control', 'private, max-age=604800');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+      return res.sendFile(f);
+    });
     r.post('/pw/lock-all', (req, res) => { this.lockAll(); res.json({ ok: true }); });
     r.get('/pw/ext/pair-code', (req, res) => res.json(this.pairCode()));
     // For the install display: has a browser paired since the click?
@@ -639,6 +770,7 @@ class PasswordManager {
     r.post('/pw/:id/unlock', J((req) => this.unlock(req.params.id, (req.body || {}).password)));
     r.post('/pw/:id/lock', (req, res) => { this.lock(req.params.id); res.json({ ok: true }); });
     r.post('/pw/:id/password', J((req) => { const i = this.get(req.params.id); if (i.type !== 'hostwerk') throw new Error(T('Only for the Hostwerk vault.')); return this.store(i.id).changePassword((req.body || {}).oldPassword, (req.body || {}).newPassword); }));
+    r.get('/pw/:id/stats', J((req) => this.stats(req.params.id)));
     r.get('/pw/:id/items', J((req) => this.items(req.params.id, req.query)));
     r.post('/pw/:id/items', J((req) => this.addItem(req.params.id, req.body || {})));
     r.get('/pw/:id/items/:item', J((req) => this.item(req.params.id, req.params.item)));
@@ -646,15 +778,25 @@ class PasswordManager {
     r.delete('/pw/:id/items/:item', J(async (req) => { await this.removeItem(req.params.id, req.params.item, { hard: req.query.hard === '1' }); return { ok: true }; }));
     r.post('/pw/:id/items/:item/restore', J((req) => { const s = this.store(req.params.id); return s.trash(req.params.item, false); }));
     r.get('/pw/:id/items/:item/totp', J(async (req) => { const it = await this.store(req.params.id).get(req.params.item); return pwc.totp(it.totp) || { error: T('No TOTP saved') }; }));
+    // Anhänge (nur Hostwerk-Tresor): verschlüsselt mit dem Tresor-Schlüssel, je Datei höchstens 5 MB
+    r.post('/pw/:id/items/:item/files', J(async (req) => { const b = req.body || {}; const meta = this.own(req.params.id).addAttachment(req.params.item, { name: b.name, mime: b.mime, data: b.data }); broadcast({ type: 'passwords', id: req.params.id }); this.record(`${this.get(req.params.id).name}: ${meta.name}`, T('Attachment added')); return meta; }));
+    r.get('/pw/:id/items/:item/files/:att', (req, res, next) => { try { const a = this.own(req.params.id).attachment(req.params.item, req.params.att); this.record(`${this.get(req.params.id).name}: ${a.name}`, T('Attachment opened')); send(res, { name: a.name, mime: 'application/octet-stream', data: a.data }); } catch (e) { next(e); } });
+    r.delete('/pw/:id/items/:item/files/:att', J(async (req) => { this.own(req.params.id).removeAttachment(req.params.item, req.params.att); broadcast({ type: 'passwords', id: req.params.id }); return { ok: true }; }));
+    r.delete('/pw/:id/items/:item/passkeys', J(async (req) => { const r2 = this.own(req.params.id).removePasskey(req.params.item, String((req.body || {}).credentialId || '')); broadcast({ type: 'passwords', id: req.params.id }); return r2; }));
+    // SSH-Schlüssel an Hostwerks SSH-Schlüssel (~/.ssh) übergeben – nie überschreiben
+    r.post('/pw/:id/items/:item/ssh-install', J(async (req) => this.sshInstall(req.params.id, req.params.item, String((req.body || {}).name || ''))));
     r.get('/pw/:id/folders', J((req) => { const s = this.store(req.params.id); return s.folders ? s.folders() : []; }));
     r.put('/pw/:id/folders', J((req) => this.store(req.params.id).setFolders((req.body || {}).folders)));
     r.get('/pw/:id/tags', J((req) => { const s = this.store(req.params.id); return s.tags ? s.tags() : []; }));
     r.post('/pw/:id/trash/empty', J((req) => ({ removed: this.store(req.params.id).emptyTrash() })));
     r.post('/pw/:id/audit', J((req) => this.audit(req.params.id, req.body || {})));
     r.get('/pw/:id/audit', J(async (req) => { const v = this.get(req.params.id); return { vault: { id: v.id, name: v.name, locked: !!this.info(v).locked }, last: this.audits.get(v.id) || null }; }));
-    r.post('/pw/:id/import', J((req) => this.importText(req.params.id, String((req.body || {}).text || ''), req.body || {})));
-    r.post('/pw/:id/import-preview', (req, res) => { const p = formats.detectAndParse(String((req.body || {}).text || '')); res.json({ format: p.format, label: p.label, count: p.items.length, sample: p.items.slice(0, 5).map(({ password, totp, ...x }) => ({ ...x, hasPassword: !!password })) }); }); // eslint-disable-line no-unused-vars
-    r.post('/pw/:id/export', async (req, res) => { if ((req.body || {}).kind === 'kdbx') { const k = await this.exportKdbx(req.params.id, (req.body || {}).password); res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(k.name)}"`); res.type(k.mime); res.send(k.data); return; } const e = await this.exportText(req.params.id, (req.body || {}).kind); res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(e.name)}"`); res.type(e.mime); res.send(e.text); });
+    // Import: { text } für Textdateien, { data (Base64), name } für .kdbx/.1pux, password für verschlüsselte, mapping für CSV
+    const payload = (b) => ({ text: b.text != null ? String(b.text) : null, data: b.data || null, name: String(b.name || ''), password: String(b.password || ''), mapping: b.mapping || null });
+    r.post('/pw/:id/import', J((req) => this.importFile(req.params.id, payload(req.body || {}), { folder: String((req.body || {}).folder || ''), skipDuplicates: (req.body || {}).skipDuplicates !== false })));
+    r.post('/pw/:id/import-preview', J((req) => this.importPreview(req.params.id, payload(req.body || {}))));
+    r.post('/pw/:id/export', async (req, res, next) => { try { send(res, await this.exportFile(req.params.id, req.body || {})); } catch (e) { next(e); } });
+    r.post('/pw/:id/backup', J(async (req) => ({ t: this.backupVault(this.own(req.params.id) && req.params.id, { force: true }) })));
     r.post('/pw/:id/transfer', J((req) => this.transfer(req.params.id, (req.body || {}).to, req.body || {})));
     r.post('/pw/:id/sync', J(async (req) => { const s = this.store(req.params.id); if (s.sync) await s.sync(); return { ok: true }; }));
   }
@@ -697,7 +839,8 @@ class PasswordManager {
     }));
     // Pairing removed in the extension → also removed in Hostwerk (the "paired browsers" list is current right away)
     r.delete('/pw/ext/self', E(async (req, e) => { this.revokeExt(e.id, 'browser'); return { ok: true }; }));
-    r.post('/pw/ext/generate', E(async (req) => ({ password: pwc.generate(req.body || {}) })));
+    // Regel der Seite (Länge, Zeichen) gilt, wenn die Erweiterung die Adresse mitschickt
+    r.post('/pw/ext/generate', E(async (req) => { const b = req.body || {}; return { password: pwc.generate(b.url ? this.genFor(b.url, b) : b) }; }));
     r.post('/pw/ext/lock', E(async () => { this.lockAll(); return { ok: true }; }));
   }
 }

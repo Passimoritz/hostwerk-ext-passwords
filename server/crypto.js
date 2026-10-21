@@ -1,6 +1,7 @@
 'use strict';
 /*
- * Crypto helpers of the password manager: key from the master password (scrypt), AES-256-GCM, TOTP (RFC 6238), password
+ * Crypto helpers of the password manager: key from the master password (Argon2id, older vaults scrypt), AES-256-GCM,
+ * Bitwarden's password-protected export (AES-CBC + HMAC), TOTP (RFC 6238), password
  * generator and rating, "Have I Been Pwned" check with k-anonymity (only the first 5 characters of the SHA-1 hash leave
  * the PC).
  */
@@ -18,18 +19,84 @@ function deriveKey(password, salt, params = SCRYPT) {
 function deriveKeyAsync(password, salt, params = SCRYPT) {
   return new Promise((ok, fail) => crypto.scrypt(Buffer.from(String(password), 'utf8'), salt, 32, { N: params.N, r: params.r, p: params.p, maxmem: params.maxmem || Math.max(64 * 1024 * 1024, 256 * params.N * params.r) }, (e, k) => (e ? fail(e) : ok(k))));
 }
+/*
+ * Schlüsselableitung ab Tresor-Format 3: Argon2id (hash-wasm, reines WebAssembly – läuft auch unter Smart App Control)
+ * mit 64 MiB, 3 Durchläufen, 1 Strang (über der OWASP-Empfehlung, ~0,5 s je Entsperren). Fehlt hash-wasm (Unit-Tests
+ * ohne Hostwerk daneben), bleibt es bei scrypt – beides steht mit Parametern im Kopf der Datei, ein späteres Entsperren
+ * hebt schwächere Tresore still an.
+ */
+const ARGON2 = { alg: 'argon2id', m: 64 * 1024, t: 3, p: 1 };
+function argonLib() { try { return require('./host').lib('hash-wasm'); } catch { return null; } }
+/** Beste verfügbare Ableitung (für neue Tresore und das Anheben alter). */
+function bestKdf() { return argonLib() ? { ...ARGON2 } : { alg: 'scrypt', N: SCRYPT.N, r: SCRYPT.r, p: SCRYPT.p }; }
+/** Kanonische Schreibweise der Parameter – geht als AAD in die Verschlüsselung ein (Kopf nicht unbemerkt änderbar). */
+function kdfText(k) { return k.alg === 'argon2id' ? `argon2id:${k.m}:${k.t}:${k.p}` : `scrypt:${k.N}:${k.r}:${k.p}`; }
+/** Schwächer als heute möglich? (dann beim nächsten Entsperren neu ableiten) */
+function kdfWeaker(k) {
+  if (!k) return true;
+  if (k.alg === 'argon2id') return k.m < ARGON2.m || k.t < ARGON2.t;
+  if (argonLib()) return true; // scrypt → Argon2id, sobald es verfügbar ist
+  return (k.N || 0) < SCRYPT.N || (k.r || 0) < SCRYPT.r;
+}
+async function deriveKdf(password, salt, k) {
+  if (k && k.alg === 'argon2id') {
+    const hw = argonLib();
+    if (!hw) throw new Error(T('Argon2 is not available – this vault needs Hostwerk’s hash-wasm library.'));
+    if (k.m > 1024 * 1024 || k.t > 64 || k.p > 16) throw new Error('kdf parameters out of range');
+    const out = await hw.argon2id({ password: Buffer.from(String(password), 'utf8'), salt, parallelism: k.p, iterations: k.t, memorySize: k.m, hashLength: 32, outputType: 'binary' });
+    return Buffer.from(out);
+  }
+  const p = k || SCRYPT;
+  if ((p.N || 0) > 2 ** 20 || (p.r || 0) > 32) throw new Error('kdf parameters out of range');
+  return deriveKeyAsync(password, salt, { N: p.N, r: p.r, p: p.p || 1 });
+}
+
 function encrypt(key, plaintext, aad = null) {
   const iv = crypto.randomBytes(12);
   const c = crypto.createCipheriv('aes-256-gcm', key, iv);
   if (aad) c.setAAD(Buffer.from(aad, 'utf8'));
-  const enc = Buffer.concat([c.update(Buffer.from(plaintext, 'utf8')), c.final()]);
+  const enc = Buffer.concat([c.update(Buffer.isBuffer(plaintext) ? plaintext : Buffer.from(plaintext, 'utf8')), c.final()]);
   return { iv: iv.toString('base64'), tag: c.getAuthTag().toString('base64'), data: enc.toString('base64') };
 }
-function decrypt(key, { iv, tag, data }, aad = null) {
+function decryptRaw(key, { iv, tag, data }, aad = null) {
   const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
   if (aad) d.setAAD(Buffer.from(aad, 'utf8'));
   d.setAuthTag(Buffer.from(tag, 'base64'));
-  return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
+  return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]);
+}
+function decrypt(key, box, aad = null) { return decryptRaw(key, box, aad).toString('utf8'); }
+
+/* ---------- Bitwarden: passwortgeschützter Export ("EncString" Typ 2 = AES-256-CBC + HMAC-SHA256) ---------- */
+const hkdfExpand = (prk, info) => crypto.createHmac('sha256', prk).update(Buffer.concat([Buffer.from(info, 'utf8'), Buffer.from([1])])).digest();
+/** Schlüssel wie Bitwardens makePinKey: PBKDF2-SHA256 oder Argon2id (Salz = SHA-256 des Salz-Textes), dann HKDF-Expand. */
+async function bitwardenKey(password, salt, { kdfType = 0, kdfIterations = 600000, kdfMemory = 64, kdfParallelism = 4 } = {}) {
+  let key;
+  if (Number(kdfType) === 1) {
+    const hw = argonLib();
+    if (!hw) throw new Error(T('Argon2 is not available – this vault needs Hostwerk’s hash-wasm library.'));
+    const s = crypto.createHash('sha256').update(String(salt), 'utf8').digest();
+    key = Buffer.from(await hw.argon2id({ password: Buffer.from(String(password), 'utf8'), salt: s, parallelism: Number(kdfParallelism) || 4, iterations: Number(kdfIterations) || 3, memorySize: (Number(kdfMemory) || 64) * 1024, hashLength: 32, outputType: 'binary' }));
+  } else {
+    const it = Math.max(5000, Math.min(5000000, Number(kdfIterations) || 600000));
+    key = await new Promise((ok, fail) => crypto.pbkdf2(Buffer.from(String(password), 'utf8'), Buffer.from(String(salt), 'utf8'), it, 32, 'sha256', (e, k) => (e ? fail(e) : ok(k))));
+  }
+  return { enc: hkdfExpand(key, 'enc'), mac: hkdfExpand(key, 'mac') };
+}
+function bwEncrypt(keys, text) {
+  const iv = crypto.randomBytes(16);
+  const c = crypto.createCipheriv('aes-256-cbc', keys.enc, iv);
+  const ct = Buffer.concat([c.update(Buffer.from(String(text), 'utf8')), c.final()]);
+  const mac = crypto.createHmac('sha256', keys.mac).update(Buffer.concat([iv, ct])).digest();
+  return `2.${iv.toString('base64')}|${ct.toString('base64')}|${mac.toString('base64')}`;
+}
+function bwDecrypt(keys, s) {
+  const m = String(s || '').match(/^2\.([^|]+)\|([^|]+)\|([^|]+)$/);
+  if (!m) throw new Error(T('Unknown Bitwarden encryption (only type 2 is supported).'));
+  const [iv, ct, mac] = m.slice(1).map((x) => Buffer.from(x, 'base64'));
+  const want = crypto.createHmac('sha256', keys.mac).update(Buffer.concat([iv, ct])).digest();
+  if (want.length !== mac.length || !crypto.timingSafeEqual(want, mac)) throw Object.assign(new Error(T('Wrong password for the export file.')), { status: 401 });
+  const d = crypto.createDecipheriv('aes-256-cbc', keys.enc, iv);
+  return Buffer.concat([d.update(ct), d.final()]).toString('utf8');
 }
 
 /* ---------- TOTP ---------- */
@@ -117,4 +184,4 @@ async function pwned(pw) {
   return line ? Number(line.split(':')[1]) || 0 : 0;
 }
 
-module.exports = { deriveKeyAsync, SCRYPT_V1, SCRYPT, deriveKey, encrypt, decrypt, totp, parseOtp, base32Decode, base32Encode, generate, passphrase, strength, pwned };
+module.exports = { deriveKeyAsync, SCRYPT_V1, SCRYPT, ARGON2, bestKdf, kdfText, kdfWeaker, deriveKdf, argonLib, bitwardenKey, bwEncrypt, bwDecrypt, deriveKey, encrypt, decrypt, decryptRaw, totp, parseOtp, base32Decode, base32Encode, generate, passphrase, strength, pwned };

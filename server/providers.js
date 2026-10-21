@@ -1,10 +1,10 @@
 'use strict';
 /*
  * Provider adapters: connect existing password managers to Hostwerk – each through the maker's official way:
- *   bitwarden   Bitwarden account or own Vaultwarden – official CLI "bw" (Hostwerk downloads it itself, signed)
- *   onepassword 1Password – official CLI "op" with a service account token (no prompts)
+ *   bitwarden   Bitwarden account or own Vaultwarden – official CLI "bw" (Hostwerk loads it itself when connecting, clis.js)
+ *   onepassword 1Password – official CLI "op" with a service account token (no prompts, also loaded by clis.js)
  *   keepass     KeePass/KeePassXC – reads and writes the .kdbx file directly (kdbxweb, KDBX 3/4, Argon2)
- *   pass        Unix password store "pass" (GPG + Git), lastpass: lastpass-cli "lpass" – when installed
+ *   pass        Unix password store "pass" (GPG + Git), lastpass: lastpass-cli "lpass" – Linux/macOS, from the package manager
  * All of them return the same shape as the Hostwerk vault (list/get/add/update/remove), secrets only on request.
  * Services without an interface (Google, Apple, Proton, Dashlane, NordPass, Enpass, …) are connected through
  * import/export – see the catalogue (pw-catalog.json) and formats.js.
@@ -16,7 +16,9 @@ const host = require('./host');
 const { T } = require('./i18n');
 
 const IS_WIN = process.platform === 'win32';
-const which = (name) => host.core('platform').which(name);
+const which = async (name) => { if (process.env.HW_TEST === '1' && process.env.HW_PW_FAKE_CLI) return `fake-${name}`; try { return await host.core('platform').which(name); } catch { return null; } };
+// 0xC0E90002 – Smart App Control / WDAC hat den Start verweigert (wie core/sac.js)
+const BLOCKED_EXIT = new Set([3236495362, -1058471934]);
 const secrets = { open: (x) => host.core('secrets').open(x), seal: (x) => host.core('secrets').seal(x) };
 
 function runCli(exe, args, { env = {}, input = null, timeout = 60000, cwd } = {}) {
@@ -26,12 +28,13 @@ function runCli(exe, args, { env = {}, input = null, timeout = 60000, cwd } = {}
     // Tests: "fake-bw", "fake-op", "fake-lpass" run as a Node script (imitation of the real programs)
     const fake = process.env.HW_TEST === '1' && process.env.HW_PW_FAKE_CLI;
     if (fake && /^fake-(bw|op|lpass)$/.test(path.basename(String(exe)))) { args = [fake, path.basename(String(exe)).slice(5), ...args]; exe = process.execPath; }
-    try { p = spawn(exe, args, { windowsHide: true, env: { ...process.env, ...env }, cwd }); } catch (e) { return resolve({ code: -1, out: '', err: e.message }); }
+    const blockedErr = (e) => e && (e.code === 'UNKNOWN' || e.errno === -4094 || (e.code === 'EACCES' && process.platform === 'win32'));
+    try { p = spawn(exe, args, { windowsHide: true, env: { ...process.env, ...env }, cwd }); } catch (e) { return resolve({ code: -1, out: '', err: e.message, blocked: blockedErr(e), missing: e.code === 'ENOENT' }); }
     const t = setTimeout(() => { try { p.kill(); } catch { /* ignore */ } }, timeout);
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { err += d; });
-    p.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out, err: e.message }); });
-    p.on('close', (code) => { clearTimeout(t); resolve({ code, out, err }); });
+    p.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out, err: e.message, blocked: blockedErr(e), missing: e.code === 'ENOENT' }); });
+    p.on('close', (code) => { clearTimeout(t); resolve({ code, out, err, blocked: BLOCKED_EXIT.has(code) }); });
     if (input != null) { try { p.stdin.end(input); } catch { /* ignore */ } } else { try { p.stdin.end(); } catch { /* ignore */ } }
     return undefined;
   });
@@ -41,10 +44,10 @@ const last = (r) => (r.err || r.out).trim().split('\n').pop();
 
 /* ================================================================ Bitwarden / Vaultwarden (bw) */
 class Bitwarden {
-  constructor(ctx, inst) { this.ctx = ctx; this.inst = inst; this.session = null; }
-  get bin() { return this.ctx.pw.cliPath('bw'); }
+  constructor(ctx, inst, pm) { this.ctx = ctx; this.inst = inst; this.pm = pm; this.session = null; }
   env() { return { BITWARDENCLI_APPDATA_DIR: path.join(this.ctx.paths.data, 'passwoerter', 'bw', this.inst.id), BW_SESSION: this.session || '', NODE_OPTIONS: '' }; }
-  async bw(args, opts = {}) { if (!this.bin) throw new Error(T('The Bitwarden CLI (bw) is not installed – download it under Passwords → Providers.')); const r = await runCli(this.bin, [...args, '--nointeraction'], { env: this.env(), ...opts }); return r; }
+  /** bw starten – fehlt das Programm, sagt die Meldung, was zu tun ist (Bitwarden verbinden = Programm laden). */
+  async bw(args, opts = {}) { const exe = await this.pm.clis.ensure('bw'); const r = await runCli(exe, [...args, '--nointeraction'], { env: this.env(), ...opts }); if (r.blocked) { this.pm.clis.markBlocked('bw'); throw this.pm.clis.blockedError('bw'); } return r; }
   async connect({ password } = {}) {
     const c = this.inst.cfg;
     fs.mkdirSync(this.env().BITWARDENCLI_APPDATA_DIR, { recursive: true });
@@ -88,10 +91,9 @@ class Bitwarden {
 
 /* ================================================================ 1Password (op) */
 class OnePassword {
-  constructor(ctx, inst) { this.ctx = ctx; this.inst = inst; this.ready = false; }
-  get bin() { return this.ctx.pw.cliPath('op'); }
+  constructor(ctx, inst, pm) { this.ctx = ctx; this.inst = inst; this.pm = pm; this.ready = false; }
   env() { return { OP_SERVICE_ACCOUNT_TOKEN: secrets.open(this.inst.cfg.token), OP_FORMAT: 'json', OP_CONFIG_DIR: path.join(this.ctx.paths.data, 'passwoerter', 'op', this.inst.id) }; }
-  async op(args, opts = {}) { if (!this.bin) throw new Error(T('The 1Password CLI (op) is not installed – download it under Passwords → Providers.')); return runCli(this.bin, args, { env: this.env(), ...opts }); }
+  async op(args, opts = {}) { const exe = await this.pm.clis.ensure('op'); const r = await runCli(exe, args, { env: this.env(), ...opts }); if (r.blocked) { this.pm.clis.markBlocked('op'); throw this.pm.clis.blockedError('op'); } return r; }
   async connect() { if (!this.inst.cfg.token) throw Object.assign(new Error(T('Service account token is missing (1Password → Developer → Service accounts).')), { status: 401 }); fs.mkdirSync(this.env().OP_CONFIG_DIR, { recursive: true }); const r = await this.op(['whoami']); if (r.code !== 0) throw Object.assign(new Error('1Password: ' + last(r)), { status: 401 }); this.ready = true; return { ok: true }; }
   locked() { return !this.ready; }
   lock() { this.ready = false; }
@@ -117,19 +119,8 @@ class OnePassword {
 }
 
 /* ================================================================ KeePass (.kdbx) */
-/* kdbxweb has no Argon2 – hash-wasm (pure WebAssembly, also runs under Smart App Control) provides it */
-let argonReady = false;
-function ensureArgon() {
-  if (argonReady) return;
-  const kdbx = host.lib('kdbxweb');
-  const hw = host.lib('hash-wasm');
-  kdbx.CryptoEngine.setArgon2Impl(async (password, salt, memory, iterations, length, parallelism, type) => {
-    const fn = type === 0 ? hw.argon2d : type === 1 ? hw.argon2i : hw.argon2id;
-    const out = await fn({ password: new Uint8Array(password), salt: new Uint8Array(salt), parallelism, iterations, memorySize: memory, hashLength: length, outputType: 'binary' });
-    return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
-  });
-  argonReady = true;
-}
+/* kdbxweb mit Argon2 (hash-wasm) kommt aus io.js */
+const ensureArgon = () => require('./io').kdbxLib();
 
 const kid = (e) => Buffer.from(String(e.uuid.id), 'base64').toString('hex'); // id usable in addresses (UUID as hex)
 class KeePass {
@@ -137,8 +128,7 @@ class KeePass {
   locked() { return !this.db; }
   lock() { this.db = null; this.creds = null; }
   async connect({ password } = {}) {
-    const kdbx = host.lib('kdbxweb');
-    ensureArgon();
+    const kdbx = ensureArgon();
     const c = this.inst.cfg;
     if (!c.file) throw new Error(T('No .kdbx file set – enter the path to the file under “Access”.'));
     if (!fs.existsSync(c.file)) throw new Error(T('The .kdbx file was not found: {file}', { file: c.file }));
@@ -160,7 +150,7 @@ class KeePass {
   walk() { this.need(); const out = []; const rec = (g, name) => { for (const e of g.entries) out.push([e, name]); for (const s of g.groups) rec(s, name ? `${name}/${s.name}` : s.name); }; rec(this.db.getDefaultGroup(), ''); return out; }
   async all() { return this.walk().map(([e, g]) => this.conv(e, g)).filter((i) => !i.trashed); }
   async get(id) { const hit = this.walk().find(([e]) => kid(e) === id); if (!hit) throw Object.assign(new Error(T('Item not found')), { status: 404 }); return this.conv(hit[0], hit[1]); }
-  fill(e, it) { const kdbx = host.lib('kdbxweb'); const P = (s) => kdbx.ProtectedValue.fromString(String(s || '')); e.fields.set('Title', it.name || ''); e.fields.set('UserName', it.username || ''); e.fields.set('Password', P(it.password)); e.fields.set('URL', (it.urls || [])[0] || ''); e.fields.set('Notes', it.notes || ''); if (it.totp) e.fields.set('otp', P(it.totp)); for (const f of it.fields || []) e.fields.set(f.name, f.hidden ? P(f.value) : String(f.value || '')); e.tags = it.tags || []; e.times.update(); }
+  fill(e, it) { const kdbx = ensureArgon(); const P = (s) => kdbx.ProtectedValue.fromString(String(s || '')); e.fields.set('Title', it.name || ''); e.fields.set('UserName', it.username || ''); e.fields.set('Password', P(it.password)); e.fields.set('URL', (it.urls || [])[0] || ''); e.fields.set('Notes', it.notes || ''); if (it.totp) e.fields.set('otp', P(it.totp)); for (const f of it.fields || []) e.fields.set(f.name, f.hidden ? P(f.value) : String(f.value || '')); e.tags = it.tags || []; e.times.update(); }
   async add(it) { this.need(); let group = this.db.getDefaultGroup(); if (it.folder) { const parts = it.folder.split('/'); for (const p of parts) { let s = group.groups.find((g) => g.name === p); if (!s) s = this.db.createGroup(group, p); group = s; } } const e = this.db.createEntry(group); this.fill(e, it); await this.save(); return this.conv(e, it.folder || ''); }
   async update(id, it) { const hit = this.walk().find(([e]) => kid(e) === id); if (!hit) throw Object.assign(new Error(T('Item not found')), { status: 404 }); hit[0].pushHistory(); this.fill(hit[0], { ...this.conv(hit[0], hit[1]), ...it }); await this.save(); return this.conv(hit[0], hit[1]); }
   async remove(id) { const hit = this.walk().find(([e]) => kid(e) === id); if (!hit) return; this.db.remove(hit[0]); await this.save(); }
@@ -174,7 +164,7 @@ class PassCli {
   locked() { return !this.ready; }
   lock() { this.ready = false; }
   env() { return this.inst.cfg.store ? { PASSWORD_STORE_DIR: this.inst.cfg.store } : {}; }
-  async connect() { if (!(await this.bin())) throw new Error(T('“pass” is not installed (apt install pass).')); const r = await runCli(await this.bin(), ['ls'], { env: this.env() }); if (r.code !== 0) throw new Error('pass: ' + (r.err || r.out).trim()); this.ready = true; return { ok: true }; }
+  async connect() { if (!(await this.bin())) throw Object.assign(new Error(T('“pass” is not installed yet – install it with your package manager (e.g. sudo apt install pass), then connect again.')), { status: 409, pwCode: 'PW_SYSTEM_MISSING' }); const r = await runCli(await this.bin(), ['ls'], { env: this.env() }); if (r.code !== 0) throw new Error('pass: ' + (r.err || r.out).trim()); this.ready = true; return { ok: true }; }
   async all() {
     const r = await runCli(await this.bin(), ['ls'], { env: this.env() });
     const out = []; const stack = [];
@@ -191,8 +181,8 @@ class LastPassCli {
   constructor(ctx, inst) { this.ctx = ctx; this.inst = inst; this.ready = false; }
   async bin() { return which('lpass'); }
   locked() { return !this.ready; }
-  lock() { this.ready = false; runCli('lpass', ['logout', '-f']).catch(() => {}); }
-  async connect({ password } = {}) { const b = await this.bin(); if (!b) throw new Error(T('lastpass-cli (lpass) is not installed.')); const pw = password || secrets.open(this.inst.cfg.password); const r = await runCli(b, ['login', '--trust', this.inst.cfg.email], { env: { LPASS_DISABLE_PINENTRY: '1' }, input: pw + '\n' }); if (r.code !== 0) throw Object.assign(new Error('LastPass: ' + last(r)), { status: 401 }); this.ready = true; return { ok: true }; }
+  lock() { const was = this.ready; this.ready = false; if (was) this.bin().then((b) => b && runCli(b, ['logout', '-f'])).catch(() => {}); }
+  async connect({ password } = {}) { const b = await this.bin(); if (!b) throw Object.assign(new Error(T('lastpass-cli is not installed yet – install it with your package manager (e.g. sudo apt install lastpass-cli), or export from LastPass and import the CSV file.')), { status: 409, pwCode: 'PW_SYSTEM_MISSING' }); const pw = password || secrets.open(this.inst.cfg.password); const r = await runCli(b, ['login', '--trust', this.inst.cfg.email], { env: { LPASS_DISABLE_PINENTRY: '1' }, input: pw + '\n' }); if (r.code !== 0) throw Object.assign(new Error('LastPass: ' + last(r)), { status: 401 }); this.ready = true; return { ok: true }; }
   async all() { const r = await runCli(await this.bin(), ['export', '--sync=now'], { env: { LPASS_DISABLE_PINENTRY: '1' } }); if (r.code !== 0) throw new Error('LastPass: ' + (r.err || r.out).trim()); const { detectAndParse } = require('./formats'); return detectAndParse(r.out).items.map((i, n) => ({ ...i, id: String(n) })); }
   async get(id) { return (await this.all())[Number(id)]; }
   async add() { throw new Error(T('LastPass through the CLI: read and export only – to write, take it over into the Hostwerk vault.')); }
@@ -203,11 +193,11 @@ class LastPassCli {
 
 // Field labels and hints in English – the interface translates them (locales/de.json)
 const PROVIDERS = {
-  bitwarden: { label: 'Bitwarden / Vaultwarden', cls: Bitwarden, native: true, cli: 'bw', fields: [['server', 'Server (empty = bitwarden.com, otherwise e.g. https://vault.example.com)', 'text'], ['email', 'E-mail', 'text'], ['password', 'Master password', 'password'], ['clientId', 'API client ID (optional, instead of a password sign-in)', 'password'], ['clientSecret', 'API client secret (optional)', 'password']], hint: 'Official CLI “bw” – works with Bitwarden accounts and self-hosted Vaultwarden (also in Hostwerk’s Docker).' },
-  onepassword: { label: '1Password', cls: OnePassword, native: true, cli: 'op', fields: [['token', 'Service account token', 'password'], ['vault', 'Vault (optional)', 'text']], hint: 'Official CLI “op” with a service account (1Password → Developer tools). Personal accounts need the 1Password app – then use import/export.' },
+  bitwarden: { label: 'Bitwarden / Vaultwarden', cls: Bitwarden, native: true, cli: 'bw', fields: [['server', 'Server (empty = bitwarden.com, otherwise e.g. https://vault.example.com)', 'text'], ['email', 'E-mail', 'text'], ['password', 'Master password', 'password'], ['clientId', 'API client ID (optional, instead of a password sign-in)', 'password'], ['clientSecret', 'API client secret (optional)', 'password']], hint: 'Official program “bw” – Hostwerk loads it by itself when connecting. Works with Bitwarden accounts and self-hosted Vaultwarden (also in Hostwerk’s Docker).' },
+  onepassword: { label: '1Password', cls: OnePassword, native: true, cli: 'op', fields: [['token', 'Service account token', 'password'], ['vault', 'Vault (optional)', 'text']], hint: 'Official program “op” with a service account (1Password → Developer tools) – Hostwerk loads it by itself when connecting. Personal accounts: export as .1pux and import.' },
   keepass: { label: 'KeePass / KeePassXC (.kdbx)', cls: KeePass, native: true, fields: [['file', 'Path to the .kdbx file', 'path'], ['password', 'Master password', 'password'], ['keyFile', 'Key file (optional)', 'path']], hint: 'Reads and writes the file directly (KDBX 3/4, Argon2). Before every write a .bak copy is made.' },
   pass: { label: 'pass (Unix password store)', cls: PassCli, native: true, linux: true, fields: [['store', 'Folder of the store (empty = ~/.password-store)', 'path']], hint: 'GPG + Git. Linux/macOS only.' },
-  lastpass: { label: 'LastPass (lastpass-cli)', cls: LastPassCli, native: true, readonly: true, fields: [['email', 'E-mail', 'text'], ['password', 'Master password', 'password']], hint: 'Through lastpass-cli – read/export only. To manage it, take it over into the Hostwerk vault.' },
+  lastpass: { label: 'LastPass (lastpass-cli)', cls: LastPassCli, native: true, readonly: true, linux: true, fields: [['email', 'E-mail', 'text'], ['password', 'Master password', 'password']], hint: 'Through lastpass-cli (Linux/macOS) – read/export only. To manage it, take it over into the Hostwerk vault. On Windows: export from LastPass and import the CSV file.' },
 };
 
 module.exports = { PROVIDERS, runCli, IS_WIN, ensureArgon };
