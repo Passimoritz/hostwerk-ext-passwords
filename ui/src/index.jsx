@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { KeyRound, Lock, Unlock, Plus, Star, Trash2, Copy, RefreshCw, ShieldCheck, Upload, Download, Puzzle, Settings2, Link2, EyeOff } from 'lucide-react';
+import { KeyRound, Lock, Unlock, Plus, Star, Trash2, Copy, RefreshCw, ShieldCheck, Upload, Download, Puzzle, Settings2, Link2, EyeOff, Wand2 } from 'lucide-react';
 import { get, post, put, del, useApi, on, waitJob, fmtDate, HAS_DESKTOP } from '@hostwerk/api';
 import { Btn, Tabs, Field, Switch, SettingRow, Seg, Empty, Loading, Callout, Modal, toast, promptDialog, InfoTip, PathInput, TileEmpty } from '@hostwerk/ui';
 import { SvcImage, contextMenu, useNew, FavMark, favSort, favMenuItem } from '@hostwerk/kit';
@@ -31,11 +31,18 @@ function CreateDialog({ data, onClose, onDone }) {
   const create = async () => {
     if (own && f.password !== f.password2) return toast.error(t('The passwords do not match.'));
     setBusy(true);
-    try { const r = await post('/pw', { type: own ? 'hostwerk' : type, name: f.name || (type === 'import' ? t('Imported vault') : ''), password: f.password, cfg: f.cfg }); toast.success(t('{name} created', { name: r.name })); onDone(r, type === 'import'); } catch (e) { toast.error(e.message); }
+    try {
+      const r = await post('/pw', { type: own ? 'hostwerk' : type, name: f.name || (type === 'import' ? t('Imported vault') : ''), password: f.password, cfg: f.cfg });
+      toast.success(t('{name} created', { name: r.name }));
+      // Anbieter mit eigenem Programm: Hostwerk lädt es schon im Hintergrund – bis zum Verbinden ist es meist da
+      if (r.cliJob && P) toast(t('Hostwerk is loading the official {label} program in the background.', { label: P.label }));
+      onDone(r, type === 'import');
+    } catch (e) { toast.error(e.message); }
     setBusy(false);
     return undefined;
   };
   const cliOk = !P || !P.cli || (data.cli && data.cli[P.cli] && data.cli[P.cli].installed);
+  const cliBlocked = P && P.cli && data.cli && data.cli[P.cli] && data.cli[P.cli].blocked;
   const blocked = own ? f.password.length < 8 || f.password !== f.password2 : missing.length > 0;
   return (
     <Modal title="Add a password manager" onClose={onClose} size="lg" footer={<><Btn onClick={onClose}>Cancel</Btn><Btn className="primary" busy={busy} disabled={blocked} title={missing.length ? t('Still missing: {list}', { list: missing.map((k) => fieldLabel(P, k)).join(', ') }) : undefined} onClick={create}>{type === 'import' ? t('Create & import') : own ? t('Create') : t('Connect')}</Btn></>}>
@@ -51,7 +58,8 @@ function CreateDialog({ data, onClose, onDone }) {
           {own && <><Field label="Master password"><input className="input" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field><Field label="Repeat"><input className="input" type="password" value={f.password2} onChange={(e) => setF({ ...f, password2: e.target.value })} /></Field><div className="span-2"><Callout kind="warn" dismissible={false}>The master password cannot be recovered – without it the vault is lost. Hostwerk stores it nowhere.</Callout></div></>}
           {!own && P && P.fields.map(([k, l, kind]) => <Field key={k} label={t(l) + (missing.includes(k) ? ' *' : '')} className={kind === 'path' ? 'span-2' : ''}>{(kind === 'path' ? <PathInput value={f.cfg[k] || ''} onChange={(v) => setF({ ...f, cfg: { ...f.cfg, [k]: v } })} mode={k === 'store' ? 'folder' : 'file'} filters={k === 'file' ? KEEPASS_FILTER() : undefined} title={t(l)} placeholder={k === 'file' ? 'Passwords.kdbx' : ''} /> : <input className="input" type={kind === 'password' ? 'password' : 'text'} value={f.cfg[k] || ''} onChange={(e) => setF({ ...f, cfg: { ...f.cfg, [k]: e.target.value } })} />)}</Field>)}
           {!own && P && <div className="span-2 small muted">{t(P.hint)}</div>}
-          {P && P.cli && !cliOk && <div className="span-2"><Callout kind="warn" dismissible={false}>{t('The program “{cli}” is not downloaded yet – download it under “Provider programs” (Hostwerk checks it with a test run).', { cli: P.cli })}</Callout></div>}
+          {P && P.cli && !cliOk && <div className="span-2 small muted row-tight"><Download size={14} aria-hidden="true" />{t('Hostwerk loads the official program “{cli}” by itself – from the maker, with a signature check.', { cli: P.cli })}</div>}
+          {cliBlocked && <div className="span-2"><Callout kind="warn" dismissible={false}>{t('Windows (Smart App Control) is currently blocking the program “{cli}”. Hostwerk tries again with every new version – until then, importing an export file works without it.', { cli: P.cli })}</Callout></div>}
         </div>
       </div>
     </Modal>
@@ -156,16 +164,45 @@ function ExtensionCard({ data, reload }) {
   );
 }
 
+/** Provider programs: only interesting for set-up providers – the others are shown calmly as “not needed”. */
 function CliCard({ data, reload }) {
   const [st, setSt] = useState(data.cli || null);
   const [busy, setBusy] = useState(null);
   useEffect(() => { get('/pw/cli').then(setSt).catch(() => {}); }, []);
-  const inst = async (n) => { setBusy(n); try { const r = await post(`/pw/cli/${n}/install`); const j = await waitJob(r.job); toast.success(t('{n} {v} downloaded and checked', { n, v: j.result.version })); setSt(await get('/pw/cli')); reload(); } catch (e) { toast.error(e.message); } setBusy(null); };
+  const inst = async (n) => { setBusy(n); try { const r = await post(`/pw/cli/${n}/install`); const j = await waitJob(r.job); toast.success(t('{n} {v} downloaded and checked', { n, v: j.result.version })); setSt(await get('/pw/cli')); reload(); } catch (e) { toast.error(e.message); setSt(await get('/pw/cli').catch(() => st)); } setBusy(null); };
+  const ROWS = [['bw', 'Bitwarden CLI (bw)', 'for Bitwarden and Vaultwarden'], ['op', '1Password CLI (op)', 'for 1Password with a service account']];
+  const state = (s2) => {
+    if (s2.blocked) return <span className="c-warn">{t('blocked by Smart App Control – Hostwerk tries again with the next version')}</span>;
+    if (s2.installed) return `${t('installed {v}', { v: s2.version || '' })}${s2.latest ? ` · ${t('current {v}', { v: s2.latest })}` : ''}${s2.own === false ? ` · ${t('from the system')}` : ''}`;
+    if (!s2.needed) return t('not needed – no such vault set up');
+    if (s2.installing) return t('is being loaded …');
+    if (s2.error) return <span className="c-err">{s2.error}</span>;
+    return t('not loaded yet – happens when connecting');
+  };
   return (
     <div className="card">
-      <div className="card-head"><Settings2 size={16} /><h3>Provider programs</h3><InfoTip>{t('Self-maintenance: version check every day, update with a test run.')}</InfoTip></div>
-      {!st ? <Loading /> : [['bw', 'Bitwarden CLI (bw)', 'for Bitwarden and Vaultwarden'], ['op', '1Password CLI (op)', 'for 1Password with a service account']].map(([n, l, x]) => <div key={n} className="list-item"><div className="ico"><Link2 /></div><div className="grow small"><b>{l}</b> <span className="muted">{t(x)}</span><div className="tiny muted">{st[n] && st[n].installed ? t('installed {v}', { v: st[n].version || '' }) : t('not installed')}{st[n] && st[n].latest ? ` · ${t('current {v}', { v: st[n].latest })}` : ''}</div></div><Btn className="xs" icon={Download} busy={busy === n} onClick={() => inst(n)}>{st[n] && st[n].installed ? t('Update') : t('Download')}</Btn></div>)}
+      <div className="card-head"><Settings2 size={16} aria-hidden="true" /><h3>Provider programs</h3><InfoTip>{t('Bitwarden and 1Password only let other programs in through their official command-line programs. Hostwerk loads them when you connect, checks checksum and signature, tests every new version before switching and keeps the last working one. Without such a vault nothing is downloaded or checked.')}</InfoTip></div>
+      {!st ? <Loading /> : ROWS.map(([n, l, x]) => { const s2 = st[n] || {}; return (
+        <div key={n} className="list-item"><div className="ico"><Link2 aria-hidden="true" /></div>
+          <div className="grow small"><b>{l}</b> <span className="muted">{t(x)}</span><div className="tiny muted">{state(s2)}</div></div>
+          {(s2.needed || s2.own) && <Btn className="xs" icon={s2.installed ? RefreshCw : Download} busy={busy === n || !!s2.installing} onClick={() => inst(n)}>{s2.installed ? t('Check for update') : t('Load now')}</Btn>}
+        </div>); })}
       {st && st.kdbxweb && <div className="card-body tiny muted">{t('KeePass library kdbxweb {v}', { v: st.kdbxweb.version })}{st.kdbxweb.latest && st.kdbxweb.latest !== st.kdbxweb.version ? ` ${t('(npm: {v} – comes with the next Hostwerk update)', { v: st.kdbxweb.latest })}` : ''} · {t('leak check through pwnedpasswords.com')}{data.catalog && data.catalog.updated ? ` · ${t('catalogue from {date}', { date: data.catalog.updated })}` : ''}</div>}
+    </div>
+  );
+}
+
+/** Generator rules per site (length/characters the site allows) – the browser extension uses them too. */
+function GenRules() {
+  const [rules, setRules] = useState(null);
+  useEffect(() => { get('/pw/gen-rules').then(setRules).catch(() => setRules({})); }, []);
+  const drop = async (site) => { try { setRules(await put('/pw/gen-rules', { site, opts: null })); } catch (e) { toast.error(e.message); } };
+  const desc = (o) => (o.words ? t('{n} words', { n: o.words }) : `${t('{n} characters', { n: o.length })} · ${[o.upper && 'A–Z', o.lower && 'a–z', o.digits && '0–9', o.symbols && '!@#'].filter(Boolean).join(' ')}`);
+  return (
+    <div className="card">
+      <div className="card-head"><Wand2 size={16} aria-hidden="true" /><h3>Generator rules</h3><InfoTip>{t('Add a rule in the generator (“Rule for this site”). New passwords for that site and its subdomains then follow it – here and in the browser extension.')}</InfoTip></div>
+      {!rules ? <Loading /> : Object.keys(rules).length === 0 ? <div className="card-body small muted">{t('No rules yet – every site gets 20 characters with all character kinds.')}</div>
+        : Object.entries(rules).map(([site, o]) => <div key={site} className="list-item"><div className="grow small"><b>{site}</b> <span className="muted tiny">{desc(o)}</span></div><button type="button" className="btn ghost xs icon" title={t('Remove rule')} aria-label={t('Remove the rule for {site}', { site })} onClick={() => drop(site)}><Trash2 /></button></div>)}
     </div>
   );
 }
@@ -218,7 +255,9 @@ function PasswordsMain({ id, tab }) {
         <div className="grid grid-2">
           <div className="stack">
             <div className="card"><div className="card-head"><Settings2 size={16} /><h3>Behaviour</h3></div><div className="card-body stack">
-              <SettingRow title="Lock automatically" text="Lock Hostwerk vaults again after being idle (minutes, 0 = never)."><input className="input sm" type="number" min={0} max={240} style={{ width: 80 }} aria-label={t('Minutes')} defaultValue={data.autoLockMin} onBlur={(e) => put('/pw', { autoLockMin: Number(e.target.value) })} /></SettingRow>
+              <SettingRow title="Lock automatically" text="Lock Hostwerk vaults again after being idle (minutes, 0 = never)."><input className="input sm pw-num" type="number" min={0} max={240} aria-label={t('Minutes')} defaultValue={data.autoLockMin} onBlur={(e) => put('/pw', { autoLockMin: Number(e.target.value) })} /></SettingRow>
+              <SettingRow title="Clear the clipboard" text="Copied passwords and codes are removed from the clipboard again after this many seconds (0 = never)."><input className="input sm pw-num" type="number" min={0} max={600} aria-label={t('Seconds')} defaultValue={data.clipboardSec ?? 30} onBlur={(e) => put('/pw', { clipboardSec: Number(e.target.value) }).then(d.reload)} /></SettingRow>
+              <SettingRow title="Website icons" text="Shows the icon of each website in the list. Hostwerk loads it once from the site itself and keeps it on this PC."><Switch checked={data.icons !== false} onChange={(v) => put('/pw', { icons: v }).then(d.reload)} /></SettingRow>
               <SettingRow title="Auto sign-in in the browser" text="If exactly one login fits a sign-in page, the extension fills it in and signs you in right away. Off by default."><Switch checked={!!data.autoLogin} onChange={(v) => put('/pw', { autoLogin: v }).then(d.reload)} /></SettingRow>
               <SettingRow title="Suggestions in the sign-in field" text="When you click into a sign-in field, the extension shows fitting logins right below – one click fills them in."><Switch checked={(data.autofill || {}).inline !== false} onChange={(v) => put('/pw', { autofill: { inline: v } }).then(d.reload)} /></SettingRow>
               <SettingRow title="Fill in on load" text="If exactly one login fits, it is already in the form when the page opens (without sending it)."><Switch checked={(data.autofill || {}).onLoad === true} onChange={(v) => put('/pw', { autofill: { onLoad: v } }).then(d.reload)} /></SettingRow>
@@ -229,7 +268,7 @@ function PasswordsMain({ id, tab }) {
             </div></div>
             <div className="card"><div className="card-head"><Trash2 size={16} /><h3>Manage vaults</h3></div>{data.instances.map((v) => <div key={v.id} className="list-item"><div className="grow small"><b>{v.name}</b> <span className="muted">{v.label}</span></div><Btn className="xs ghost" onClick={() => rename(v)}>Rename</Btn>{v.type === 'hostwerk' ? <Btn className="xs ghost" onClick={() => setCfg(v)}>Master password</Btn> : <Btn className="xs ghost" onClick={() => setCfg(v)}>Access</Btn>}<button className="btn ghost xs icon" title="Remove …" aria-label={t('Remove …')} onClick={() => removeVault(v, d.reload)}><Trash2 /></button></div>)}</div>
           </div>
-          <div className="stack"><CliCard data={data} reload={d.reload} /><InfoTip><b>{t('No maintenance:')}</b> {t('provider programs are checked every day and updated with a test run, new import formats and services come through the online catalogue.')} <b>{t('The AI helper has no access at all')}</b> {t('to vaults, items or vault files – neither reading nor searching.')}</InfoTip></div>
+          <div className="stack"><CliCard data={data} reload={d.reload} /><GenRules /><InfoTip><b>{t('No maintenance:')}</b> {t('provider programs are checked every day and updated with a test run, new import formats and services come through the online catalogue.')} <b>{t('The AI helper has no access at all')}</b> {t('to vaults, items or vault files – neither reading nor searching.')}</InfoTip></div>
         </div>
       )}
       {create && <CreateDialog data={data} onClose={() => setCreate(false)} onDone={(r, imp) => { setCreate(false); d.reload(); if (r && r.id) location.hash = `${BASE}/${r.id}${imp ? '/io' : ''}`; }} />}
@@ -270,8 +309,8 @@ function SecurityTile() {
   const [busy, setBusy] = useState(false);
   if (d.error && !d.data) return <TileEmpty icon={ShieldCheck} text={t('Could not load the vaults')} action={t('Try again')} onClick={() => d.reload()} />;
   if (!d.data) return <div className="card-body"><Loading /></div>;
-  if (!vault) return <TileEmpty icon={KeyRound} text={t('No vault yet')} action={t('Create vault')} href="#/passwoerter" />;
-  const open = `#/passwoerter/${encodeURIComponent(vault.id)}/audit`;
+  if (!vault) return <TileEmpty icon={KeyRound} text={t('No vault yet')} action={t('Create vault')} href="#/ext/passwords" />;
+  const open = `#/ext/passwords/${encodeURIComponent(vault.id)}/audit`;
   if (vault.locked) return <TileEmpty icon={Lock} text={t('“{name}” is locked – unlock it to check.', { name: vault.name })} action={t('Unlock')} href={open} />;
   const r = last.data && last.data.last;
   const check = async () => { setBusy(true); try { const x = await post(`/pw/${vault.id}/audit`); last.setData({ ...(last.data || {}), last: x }); } catch (e) { toast.error(e); } setBusy(false); };
