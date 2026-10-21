@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const path = require('path');
 const host = require('./host');
 const formats = require('./formats');
+const { iconOf } = require('./store');
 const pwc = require('./crypto');
 const { T } = require('./i18n');
 
@@ -70,7 +71,9 @@ function kdbxItems(db) {
       const get = (k) => kval(e, k);
       const url = get('URL');
       const pk = passkeyFromKeepass(get);
+      const ci = e.customIcon && db.meta.customIcons.get(e.customIcon.id);
       out.push({
+        icon: ci ? iconOf({ data: Buffer.from(ci.data) }) : null,
         type: 'login', name: get('Title') || T('(untitled)'), username: get('UserName') || (pk && pk.userName) || '', password: get('Password'), urls: url ? [url] : (pk ? [`https://${pk.rpId}`] : []),
         totp: get('otp') || get('TOTP Seed') || get('TimeOtp-Secret-Base32'), notes: get('Notes'), folder: name, tags: e.tags || [], favorite: false,
         fields: [...e.fields.keys()].filter((k) => !STD.has(k) && !k.startsWith('KPEX_PASSKEY_')).map((k) => ({ name: k, value: get(k), hidden: typeof e.fields.get(k) !== 'string' })),
@@ -123,6 +126,8 @@ async function writeKdbx(items, password, title = 'Hostwerk') {
     const pk = (it.passkeys || [])[0];
     if (pk) for (const [k, v] of Object.entries(passkeyToKeepass(pk))) if (v) e.fields.set(k, k === 'KPEX_PASSKEY_PRIVATE_KEY_PEM' ? P(v) : String(v));
     e.tags = Array.isArray(it.tags) ? it.tags : [];
+    // Eigenes Bild → „Custom Icon“ der KeePass-Datei
+    if (it.icon && it.icon.data) { const u = kdbx.KdbxUuid.random(); db.meta.customIcons.set(u.id, { data: new Uint8Array(Buffer.from(it.icon.data, 'base64')).buffer, name: it.name || '', lastModified: new Date() }); e.customIcon = u; }
   }
   return Buffer.from(await db.save());
 }
@@ -158,6 +163,9 @@ function keepassXmlItems(xml) {
   if (!rootEl) throw new Error(T('This XML file is not a KeePass export.'));
   const meta = kid(file, 'Meta');
   const bin = meta && kid(meta, 'RecycleBinUUID') ? kid(meta, 'RecycleBinUUID').text.trim() : '';
+  // Eigene Symbole: <Meta><CustomIcons><Icon><UUID/><Data/> (Base64), Einträge verweisen mit <CustomIconUUID>
+  const icons = new Map(); const ci = meta && kid(meta, 'CustomIcons');
+  for (const ic of ci ? kids(ci, 'Icon') : []) { const u = kid(ic, 'UUID'); const d = kid(ic, 'Data'); if (u && d) icons.set(u.text.trim(), d.text.trim()); }
   const out = [];
   const rec = (g, name) => {
     const uuid = kid(g, 'UUID') ? kid(g, 'UUID').text.trim() : '';
@@ -169,7 +177,8 @@ function keepassXmlItems(xml) {
       const pk = passkeyFromKeepass(get);
       const tags = kid(e, 'Tags') ? kid(e, 'Tags').text.split(/[;,]/).map((x) => x.trim()).filter(Boolean) : [];
       const hist = kid(e, 'History') ? kids(kid(e, 'History'), 'Entry').map((h) => { const s = kids(h, 'String').find((x) => kid(x, 'Key') && kid(x, 'Key').text === 'Password'); return s && kid(s, 'Value') ? kid(s, 'Value').text : ''; }).filter(Boolean).reverse().slice(0, 10).map((p) => ({ password: p, until: null })) : [];
-      out.push({ type: 'login', name: get('Title') || T('(untitled)'), username: get('UserName'), password: get('Password'), urls: get('URL') ? [get('URL')] : [], totp: get('otp') || get('TOTP Seed'), notes: get('Notes'), folder: name, tags, favorite: false, fields: [...vals.keys()].filter((k) => !STD.has(k) && !k.startsWith('KPEX_PASSKEY_') && vals.get(k)).map((k) => ({ name: k, value: vals.get(k), hidden: secret.has(k) })), passkeys: pk ? [pk] : [], history: hist, source: 'keepass-xml' });
+      const iu = kid(e, 'CustomIconUUID') ? kid(e, 'CustomIconUUID').text.trim() : '';
+      out.push({ icon: iu && icons.has(iu) ? iconOf(icons.get(iu)) : null, type: 'login', name: get('Title') || T('(untitled)'), username: get('UserName'), password: get('Password'), urls: get('URL') ? [get('URL')] : [], totp: get('otp') || get('TOTP Seed'), notes: get('Notes'), folder: name, tags, favorite: false, fields: [...vals.keys()].filter((k) => !STD.has(k) && !k.startsWith('KPEX_PASSKEY_') && vals.get(k)).map((k) => ({ name: k, value: vals.get(k), hidden: secret.has(k) })), passkeys: pk ? [pk] : [], history: hist, source: 'keepass-xml' });
     }
     for (const s of kids(g, 'Group')) { const n = kid(s, 'Name') ? kid(s, 'Name').text : ''; rec(s, name ? `${name}/${n}` : n); }
   };

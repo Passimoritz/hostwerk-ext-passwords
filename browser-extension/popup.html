@@ -57,7 +57,10 @@ button[disabled] { opacity: .55; cursor: default; }
 .list { display: flex; flex-direction: column; gap: 6px; }
 .item { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border: 1px solid var(--ln); border-radius: 10px; animation: fade .2s ease-out both; }
 .item:hover { border-color: var(--ac); }
-.av { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; color: #fff; flex: none; }
+.av { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; color: #fff; flex: none; background-size: cover; background-position: center; }
+.av.img { color: transparent; background-color: var(--card) !important; }
+.upd { display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 8px 10px; border: 1px solid var(--ac2); border-radius: 10px; font-size: 12px; }
+.upd span { flex: 1; }
 .item .n { flex: 1; min-width: 0; }
 .item .n b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .n span { color: var(--mu); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
@@ -88,6 +91,8 @@ details summary { cursor: pointer; color: var(--mu); font-size: 12px; }
   <button class="ic hid" id="lockBtn" title="Lock all vaults" aria-label="Lock all vaults"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></button>
 </div>
 
+<div class="upd hid" id="updBar" role="status"><span id="updText">A newer version is ready.</span><button class="s" id="updBtn">Update now</button></div>
+
 <div class="wrap hid" id="pairView">
   <div class="pairArt" id="pairArt" aria-hidden="true">
     <div class="tile"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
@@ -107,7 +112,7 @@ details summary { cursor: pointer; color: var(--mu); font-size: 12px; }
 </div>
 
 <div class="wrap hid" id="offlineView">
-  <div class="empty"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5.1A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.8M19 12.9a10 10 0 0 0-2.4-1.6M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></svg><b style="color:var(--tx)">Hostwerk does not answer</b><span id="offlineText">Is Hostwerk running on this PC?</span></div>
+  <div class="empty"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M10.7 5.1A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5.2-2.8M19 12.9a10 10 0 0 0-2.4-1.6M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></svg><b style="color:var(--tx)" id="offlineTitle">Hostwerk does not answer</b><span id="offlineText">Is Hostwerk running on this PC?</span></div>
   <button id="retryBtn">Try again</button>
 </div>
 

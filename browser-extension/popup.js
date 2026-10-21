@@ -18,8 +18,17 @@ async function activeTab() { const [t] = await api.tabs.query({ active: true, cu
 async function init() {
   tab = tab || await activeTab();
   status = await send({ type: 'status', fresh: true });
-  if (!status.paired) { state(T('Not paired'), 'off'); view('pairView'); waitForPair(); return; }
-  if (status.offline) { state(T('No connection'), 'off'); $('offlineText').textContent = status.error || T('Is Hostwerk running on this PC?'); view('offlineView'); return; }
+  // Neuere Fassung liegt bereit (Hostwerk hat den Ordner schon aktualisiert) → ein Klick lädt sie
+  show('updBar', !!status.update);
+  if (status.update) $('updText').textContent = T('Version {v} is ready.', { v: status.update });
+  // Hostwerk läuft nicht – egal ob schon gekoppelt: das ist die Ursache, nicht die Kopplung
+  if (status.reason === 'offline') { state(T('No connection'), 'off'); $('offlineTitle').textContent = T('Hostwerk is not running'); $('offlineText').textContent = T('Start Hostwerk on this PC – the extension connects by itself, also on another port.'); view('offlineView'); waitForPair(); return; }
+  if (!status.paired) {
+    state(T('Not paired'), 'off');
+    $('pairHint').textContent = status.reason === 'expired' ? T('The pairing has run out. In Hostwerk open Passwords → Browser and click “Install” for this browser – it connects again by itself.') : T('Hostwerk is looking for you right now – in Hostwerk open Passwords → Browser and click “Install” for this browser. Pairing then happens by itself.');
+    view('pairView'); waitForPair(); return;
+  }
+  if (status.offline) { state(T('No connection'), 'off'); $('offlineTitle').textContent = T('Hostwerk does not answer'); $('offlineText').textContent = status.error || T('Is Hostwerk running on this PC?'); view('offlineView'); return; }
   const vaults = status.vaults || [];
   const open = vaults.filter((v) => !v.locked);
   if (!open.length && vaults.length) return showLocked(vaults);
@@ -72,6 +81,8 @@ $('unlockForm').addEventListener('submit', async (e) => {
 function itemRow(it, i = 0) {
   const name = it.name || '';
   const av = el('div', { className: 'av', textContent: (name.trim()[0] || '?').toUpperCase() }); av.style.background = `hsl(${hue(name)} 55% 46%)`;
+  // Eigenes Bild des Eintrags (aus Hostwerk) statt Anfangsbuchstabe
+  if (it.hasIcon) send({ type: 'icon', vault: it.vault, item: it.id }).then((r) => { if (r && r.data) { av.style.backgroundImage = `url("${r.data}")`; av.classList.add('img'); } });
   const fillBtn = el('button', { className: 'p s', textContent: T('Fill in') });
   const d = el('div', { className: 'item' }, av, el('div', { className: 'n' }, el('b', { textContent: name }), el('span', { textContent: (it.username || (it.urls || [])[0] || '') + (it.vaultName ? ' · ' + it.vaultName : '') })), fillBtn);
   d.style.animationDelay = `${Math.min(i, 8) * 25}ms`;
@@ -133,7 +144,7 @@ let pairWait = null;
 function waitForPair() {
   clearInterval(pairWait);
   // The background looks for Hostwerk; once paired: connection animation and go on
-  pairWait = setInterval(async () => { const s = await send({ type: 'status' }); if (s.paired) { clearInterval(pairWait); $('pairArt').classList.add('ok'); state(T('Paired'), ''); setTimeout(init, 600); } }, 1500);
+  pairWait = setInterval(async () => { const s = await send({ type: 'status', fresh: true }); if (s.paired && !s.offline) { clearInterval(pairWait); $('pairArt').classList.add('ok'); state(T('Paired'), ''); setTimeout(init, 600); } }, 1500);
 }
 $('pairBtn').onclick = async () => {
   $('pairMsg').textContent = ''; $('pairBtn').disabled = true;
@@ -145,6 +156,7 @@ $('pairBtn').onclick = async () => {
 
 /* ---------- other ---------- */
 $('retryBtn').onclick = () => { state(T('Connecting …'), 'busy'); init(); };
+$('updBtn').onclick = async () => { $('updBtn').disabled = true; await send({ type: 'reload' }); window.close(); };
 $('lockBtn').onclick = async () => { await send({ type: 'lock' }); init(); };
 $('unpair').onclick = (e) => { e.preventDefault(); view('unpairConfirm'); };
 $('unpairNo').onclick = () => init();

@@ -75,6 +75,14 @@
     'Use strong password': 'Starkes Passwort verwenden',
     '🔒 Unlock vault': '🔒 Tresor entsperren',
     'Opens Hostwerk Passwords – then your logins show up here': 'Öffnet Hostwerk Passwörter – danach erscheinen hier deine Zugänge',
+    'A newer version is ready.': 'Eine neuere Fassung liegt bereit.',
+    'Version {v} is ready.': 'Fassung {v} liegt bereit.',
+    'Update now': 'Jetzt aktualisieren',
+    'Hostwerk is not running': 'Hostwerk läuft nicht',
+    'Start Hostwerk on this PC – the extension connects by itself, also on another port.': 'Starte Hostwerk auf diesem PC – die Erweiterung verbindet sich von selbst, auch auf einem anderen Port.',
+    'Hostwerk is not running on this PC – start it, the extension connects by itself.': 'Hostwerk läuft auf diesem PC nicht – starte es, die Erweiterung verbindet sich von selbst.',
+    'The pairing has run out. In Hostwerk open Passwords → Browser and click “Install” for this browser – it connects again by itself.': 'Die Kopplung ist abgelaufen. Öffne in Hostwerk Passwörter → Browser und klicke bei diesem Browser auf „Installieren“ – sie verbindet sich dann wieder von selbst.',
+    'In Hostwerk open Passwords → Browser and click “Install” for this browser – it connects by itself.': 'Öffne in Hostwerk Passwörter → Browser und klicke bei diesem Browser auf „Installieren“ – sie verbindet sich von selbst.',
   };
   const lang = (() => { try { return String((typeof navigator !== 'undefined' && (navigator.language || '')) || '').toLowerCase(); } catch { return ''; } })();
   const de = lang.startsWith('de');

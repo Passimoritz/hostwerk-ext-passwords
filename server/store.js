@@ -35,6 +35,7 @@ const TYPES = ['login', 'note', 'card', 'identity', 'ssh'];
 const MAX_HISTORY = 10;
 const MAX_FILE = 5 * 1024 * 1024;   // one attachment
 const MAX_FILES = 50 * 1024 * 1024; // all attachments of a vault
+const MAX_ICON = 128 * 1024; // eigenes Bild je Eintrag (die Oberfläche verkleinert vorher auf 128 px)
 const PASSKEY_KEYS = ['credentialId', 'keyType', 'keyAlgorithm', 'keyCurve', 'keyValue', 'rpId', 'rpName', 'userHandle', 'userName', 'userDisplayName', 'counter', 'discoverable', 'creationDate'];
 const hostOf = (u) => { try { return new URL(/^[a-z][\w+.-]*:\/\//i.test(u) ? u : `https://${u}`).hostname.toLowerCase(); } catch { return ''; } };
 
@@ -145,8 +146,8 @@ class VaultStore {
     return { all: live.length, fav: live.filter((i) => i.favorite).length, ...by, passkey: live.filter((i) => (i.passkeys || []).length).length, files: live.filter((i) => (i.attachments || []).length).length, trash: d.items.length - live.length, tags: this.tags(), folders: this.folders() };
   }
   pub(i) {
-    const { password, totp, fields, notes, card, identity, history, ssh, passkeys, attachments, ...rest } = i; // eslint-disable-line no-unused-vars
-    return { ...rest, hasPassword: !!password, hasTotp: !!totp, hasNotes: !!notes, fieldCount: (fields || []).length, historyCount: (history || []).length, cardLast4: card && card.number ? String(card.number).slice(-4) : null, passkeyCount: (passkeys || []).length, attachmentCount: (attachments || []).length, sshType: ssh ? ssh.keyType || null : null, pwScore: password ? strength(password).score : null, host: hostOf((i.urls || [])[0] || '') || null };
+    const { password, totp, fields, notes, card, identity, history, ssh, passkeys, attachments, icon, ...rest } = i; // eslint-disable-line no-unused-vars
+    return { ...rest, hasIcon: !!(icon && icon.data), iconV: icon && icon.data ? icon.v || 1 : null, hasPassword: !!password, hasTotp: !!totp, hasNotes: !!notes, fieldCount: (fields || []).length, historyCount: (history || []).length, cardLast4: card && card.number ? String(card.number).slice(-4) : null, passkeyCount: (passkeys || []).length, attachmentCount: (attachments || []).length, sshType: ssh ? ssh.keyType || null : null, pwScore: password ? strength(password).score : null, host: hostOf((i.urls || [])[0] || '') || null };
   }
   get(id) { const i = this.need().items.find((x) => x.id === id); if (!i) throw Object.assign(new Error(T('Item not found')), { status: 404 }); return i; }
   normalize(b, old = null) {
@@ -166,6 +167,8 @@ class VaultStore {
       // Passkeys come only by import (Bitwarden JSON) – kept and exported again, never changed here
       passkeys: (old ? old.passkeys || [] : Array.isArray(b.passkeys) ? b.passkeys : []).filter((p) => p && typeof p === 'object').slice(0, 20).map((p) => Object.fromEntries(PASSKEY_KEYS.filter((k) => p[k] != null).map((k) => [k, String(p[k]).slice(0, 4000)]))),
       attachments: (old && old.attachments) || [],
+      // Eigenes Bild: beim Ändern bleibt es (eigener Weg setIcon), beim Anlegen/Import darf es mitkommen
+      icon: old ? old.icon || null : iconOf(b.icon),
       created: old ? old.created : Number(b.created) || Date.now(), updated: Date.now(), passwordChanged: old ? old.passwordChanged : Number(b.passwordChanged) || Date.now(),
       history: old ? old.history || [] : (Array.isArray(b.history) ? b.history.filter((h) => h && h.password).slice(0, MAX_HISTORY).map((h) => ({ password: String(h.password), until: Number(h.until) || null })) : []),
       trashed: old ? old.trashed || false : false, source: b.source || (old && old.source) || null,
@@ -218,6 +221,16 @@ class VaultStore {
     this.save();
     fs.rmSync(this.attFile(attId), { force: true });
   }
+  /** Own image of an item (PNG/JPEG/WebP/GIF, at most 128 KB) – inside the encrypted vault like everything else. */
+  setIcon(itemId, buf) {
+    const it = this.get(itemId);
+    it.icon = buf ? iconOf({ data: buf }) : null;
+    if (buf && !it.icon) throw Object.assign(new Error(T('Only PNG, JPEG, WebP or GIF images up to {kb} KB.', { kb: MAX_ICON / 1024 })), { status: 400 });
+    it.updated = Date.now();
+    this.save();
+    return this.pub(it);
+  }
+  icon(itemId) { const it = this.get(itemId); return it.icon && it.icon.data ? { mime: it.icon.mime, data: Buffer.from(it.icon.data, 'base64') } : null; }
   removePasskey(itemId, credentialId) { const it = this.get(itemId); it.passkeys = (it.passkeys || []).filter((p) => p.credentialId !== credentialId); it.updated = Date.now(); this.save(); return this.pub(it); }
   dropFiles(i) { for (const a of i.attachments || []) { try { fs.rmSync(this.attFile(a.id), { force: true }); } catch { /* weg */ } } }
 
@@ -230,4 +243,23 @@ class VaultStore {
   }
 }
 
-module.exports = { VaultStore, TYPES, MAX_FILE, MAX_FILES, hostOf };
+/** Image type by its first bytes (no SVG – it could carry scripts). */
+function imageMime(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  if (buf.subarray(0, 3).toString('latin1') === 'GIF') return 'image/gif';
+  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  return null;
+}
+/** { data: Buffer|Base64|data:-address } → { mime, data (Base64), v } or null when it is no allowed image. */
+function iconOf(x) {
+  if (!x) return null;
+  let d = x.data !== undefined ? x.data : x;
+  if (typeof d === 'string') { const m = d.match(/^data:[^;,]*;base64,(.*)$/); d = Buffer.from(m ? m[1] : d, 'base64'); }
+  if (!Buffer.isBuffer(d) || d.length > MAX_ICON) return null;
+  const mime = imageMime(d);
+  return mime ? { mime, data: d.toString('base64'), v: Date.now() } : null;
+}
+
+module.exports = { VaultStore, TYPES, MAX_FILE, MAX_FILES, MAX_ICON, hostOf, imageMime, iconOf };

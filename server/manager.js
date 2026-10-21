@@ -20,7 +20,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { VaultStore, TYPES, hostOf } = require('./store');
-const { PROVIDERS, IS_WIN } = require('./providers');
+const { PROVIDERS, NO_ICONS, IS_WIN } = require('./providers');
+const { imageMime, MAX_ICON } = require('./store');
 const { Clis } = require('./clis');
 const formats = require('./formats');
 const io = require('./io');
@@ -189,11 +190,35 @@ class PasswordManager {
     return { all: live.length, fav: count((x) => x.favorite), ...Object.fromEntries(TYPES.map((t) => [t, count((x) => x.type === t)])), passkey: count((x) => (x.passkeys || []).length), files: 0, trash: 0, folders: [...folders].map(([name, n]) => ({ name, count: n })).sort((a, b) => a.name.localeCompare(b.name, 'de')), tags: [...tags].map(([name, n]) => ({ name, count: n })).sort((a, b) => b.count - a.count) };
   }
   /** Ein Eintrag mit Geheimnissen – private Schlüssel der Passkeys bleiben im Tresor (nur für Export/Übertragen). */
-  async item(id, itemId) { const i = this.get(id); const s = this.store(id); if (i.type !== 'hostwerk' && s.locked()) throw Object.assign(new Error(T('Not connected')), { status: 423 }); const it = await s.get(itemId); this.record(`${i.name}: ${it.name}`, T('Item viewed (secret retrieved)')); return { ...it, passkeys: (it.passkeys || []).map(({ keyValue, ...p }) => ({ ...p, hasKey: !!keyValue })), pwStrength: it.password ? pwc.strength(it.password) : null }; }
+  async item(id, itemId) { const i = this.get(id); const s = this.store(id); if (i.type !== 'hostwerk' && s.locked()) throw Object.assign(new Error(T('Not connected')), { status: 423 }); const it = await s.get(itemId); this.record(`${i.name}: ${it.name}`, T('Item viewed (secret retrieved)')); return { ...it, icon: undefined, hasIcon: !!(it.icon && it.icon.data) || !!it.hasIcon, iconV: (it.icon && it.icon.v) || it.iconV || null, passkeys: (it.passkeys || []).map(({ keyValue, ...p }) => ({ ...p, hasKey: !!keyValue })), pwStrength: it.password ? pwc.strength(it.password) : null }; }
   /** SSH-Einträge: öffentlichen Teil und Fingerabdruck aus dem privaten Schlüssel ableiten. */
   prepItem(b) { if (b && b.type === 'ssh' && b.ssh && (b.ssh.privateKey || b.ssh.publicKey)) return { ...b, ssh: sshkey.describe(b.ssh) }; return b; }
   async addItem(id, b) { const i = this.get(id); const s = this.store(id); if (PROVIDERS[i.type] && PROVIDERS[i.type].readonly) throw new Error(T('This provider is read-only.')); const it = await s.add(this.prepItem(b)); broadcast({ type: 'passwords', id }); return i.type === 'hostwerk' ? s.pub(it) : it; }
   async updateItem(id, itemId, b) { const i = this.get(id); const s = this.store(id); if (PROVIDERS[i.type] && PROVIDERS[i.type].readonly) throw new Error(T('This provider is read-only.')); const it = await s.update(itemId, this.prepItem(b)); broadcast({ type: 'passwords', id }); return i.type === 'hostwerk' ? s.pub(it) : it; }
+  /** Kann dieser Tresor eigene Bilder speichern? → { ok, why } (why = Grund in Englisch, die Oberfläche übersetzt) */
+  iconSupport(type) { return type === 'hostwerk' || type === 'keepass' ? { ok: true, why: null } : { ok: false, why: NO_ICONS[type] || 'This provider cannot store own images.' }; }
+  /** Own image of an item: data: address / Base64 (null = remove). Hostwerk vault encrypted, KeePass as custom icon. */
+  async setItemIcon(id, itemId, data) {
+    const i = this.get(id); const s = this.store(id);
+    const sup = this.iconSupport(i.type);
+    if (!sup.ok) throw Object.assign(new Error(T(sup.why)), { status: 400 });
+    let buf = null;
+    if (data) {
+      const m = String(data).match(/^data:[^;,]*;base64,(.*)$/);
+      buf = Buffer.from(m ? m[1] : String(data), 'base64');
+      if (buf.length > MAX_ICON || !imageMime(buf)) throw Object.assign(new Error(T('Only PNG, JPEG, WebP or GIF images up to {kb} KB.', { kb: MAX_ICON / 1024 })), { status: 400 });
+    }
+    if (i.type !== 'hostwerk' && s.locked()) throw Object.assign(new Error(T('Not connected')), { status: 423 });
+    const r = i.type === 'hostwerk' ? s.setIcon(itemId, buf) : await s.setIcon(itemId, buf);
+    broadcast({ type: 'passwords', id });
+    return { ok: true, hasIcon: !!r.hasIcon, iconV: r.iconV || null };
+  }
+  async itemIcon(id, itemId) {
+    const i = this.get(id); const s = this.store(id);
+    if (i.type === 'hostwerk') return s.icon(itemId);
+    if (s.getIcon && !s.locked()) { const b = await s.getIcon(itemId); return b ? { mime: imageMime(b) || 'image/png', data: b } : null; }
+    return null;
+  }
   /** Nur Hostwerk-Tresore: Anhänge, Passkeys entfernen */
   own(id) { const i = this.get(id); if (i.type !== 'hostwerk') throw Object.assign(new Error(T('Only for the Hostwerk vault.')), { status: 400 }); return this.store(id); }
   async removeItem(id, itemId, { hard = false } = {}) { const i = this.get(id); const s = this.store(id); if (i.type === 'hostwerk' && !hard) s.trash(itemId, true); else await s.remove(itemId); broadcast({ type: 'passwords', id }); }
@@ -455,10 +480,10 @@ class PasswordManager {
     const m = origin.match(/^(chrome|moz)-extension:\/\/([a-z0-9-]+)$/i);
     if (!m) throw Object.assign(new Error(T('Only for the browser extension.')), { status: 403 });
     const w = this.pairWindow;
-    if (!w || Date.now() > w.until) throw Object.assign(new Error(T('Pairing not allowed – click “Install” in Hostwerk under Passwords → Browser.')), { status: 403 });
+    if (!w || Date.now() > w.until) throw this.pairFail('window', T('Pairing not allowed – click “Install” in Hostwerk under Passwords → Browser.'), 403);
     // Store version: only the real extension id
     const ids = Object.values((this.storeInfo || {}).ids || {}).filter(Boolean);
-    if (m[1] === 'chrome' && ids.length && !ids.includes(m[2]) && !this.devExt) throw Object.assign(new Error(T('Unknown extension.')), { status: 403 });
+    if (m[1] === 'chrome' && ids.length && !ids.includes(m[2]) && !this.devExt) throw this.pairFail('unknown', T('Unknown extension.'), 403);
     this.pairWindow = null;
     const ticket = this.pairTicket();
     const name = { chrome: 'Chrome', edge: 'Edge', brave: 'Brave', opera: 'Opera', vivaldi: 'Vivaldi', firefox: 'Firefox' }[w.browser] || 'Browser';
@@ -505,15 +530,38 @@ class PasswordManager {
     return { mode: 'store', id, page, registered };
   }
 
-  /** One-time ticket for automatic pairing: lies as hostwerk-pairing.json in the extension folder (valid for 30 min). */
+  /** One-time ticket (in memory, 30 min) – for automatic pairing right after "Install" without the folder. */
   pairTicket() { const ticket = crypto.randomBytes(24).toString('hex'); this.pairings.set(ticket, { at: Date.now(), auto: true }); setTimeout(() => this.pairings.delete(ticket), 30 * 60000).unref(); return ticket; }
-  pair(code, { name = 'Browser', browser = '' } = {}) {
-    const p = this.pairings.get(String(code || ''));
-    if (!p) throw Object.assign(new Error(T('Pairing code invalid or expired – show a new one in Hostwerk under Passwords → Browser.')), { status: 401 });
-    this.pairings.delete(String(code));
+  /**
+   * Ticket for the extension folder (hostwerk-pairing.json): stored as a hash in the settings, valid for 90 days and
+   * reusable – so the extension pairs itself again after a Hostwerk restart, a lost key or an update, without a code.
+   * Whoever can read the folder is the user of this PC anyway (same trust as the settings file).
+   */
+  get extTickets() { if (!Array.isArray(this.cfg.extTickets)) this.cfg.extTickets = []; this.cfg.extTickets = this.cfg.extTickets.filter((x) => x && x.until > Date.now()); return this.cfg.extTickets; }
+  folderTicket(existing = null) {
+    const sha = (x) => crypto.createHash('sha256').update(String(x)).digest('hex');
+    if (existing && this.extTickets.some((x) => x.hash === sha(existing) && x.until - Date.now() > 30 * DAY)) return existing;
+    const ticket = crypto.randomBytes(24).toString('hex');
+    this.cfg.extTickets = [...this.extTickets, { hash: sha(ticket), created: Date.now(), until: Date.now() + 90 * DAY }].slice(-5);
+    this.save();
+    return ticket;
+  }
+  /** Remember why pairing failed (the extension card in Hostwerk shows it with the fix). */
+  pairFail(reason, message, status = 401) { this.extPairError = { at: Date.now(), reason, message }; return Object.assign(new Error(message), { status, reason }); }
+  pair(code, { name = 'Browser', browser = '', version = '' } = {}) {
+    const c = String(code || '');
+    const sha = crypto.createHash('sha256').update(c).digest('hex');
+    const p = this.pairings.get(c);
+    const folder = !p && c.length === 48 && this.extTickets.find((x) => x.hash === sha);
+    if (!p && !folder) throw this.pairFail(c.length === 48 ? 'ticket' : 'code', c.length === 48 ? T('The pairing file of the extension is out of date – click “Install” in Hostwerk under Passwords → Browser once more.') : T('Pairing code invalid or expired – show a new one in Hostwerk under Passwords → Browser.'));
+    if (p) this.pairings.delete(c);
+    // Erneute Kopplung desselben Browsers über die Ordner-Datei ersetzt den alten Eintrag (keine Doppelten in der Liste)
+    if (folder) this.cfg.ext = this.cfg.ext.filter((x) => !(x.via === sha && x.browser === String(browser).slice(0, 40)));
     const token = crypto.randomBytes(32).toString('hex');
-    const e = { id: crypto.randomBytes(4).toString('hex'), name: String(name).slice(0, 60), browser: String(browser).slice(0, 40), hash: crypto.createHash('sha256').update(token).digest('hex'), created: Date.now(), lastUse: null, until: Date.now() + EXT_TTL };
+    const e = { id: crypto.randomBytes(4).toString('hex'), name: String(name).slice(0, 60), browser: String(browser).slice(0, 40), hash: crypto.createHash('sha256').update(token).digest('hex'), created: Date.now(), lastUse: null, until: Date.now() + EXT_TTL, version: String(version || '').slice(0, 20) || null, ...(folder ? { via: sha } : {}) };
     this.cfg.ext.push(e); this.save(); broadcast({ type: 'passwords' });
+    this.extPairError = null;
+    this.pairWindow = null; // gekoppelt (egal auf welchem Weg) → das Fenster für Kopplung ohne Datei schließt sich
     this.record(e.name, T('Browser extension paired'));
     return { token, id: e.id, port: this.ctx.uiPort(), name: e.name };
   }
@@ -524,6 +572,8 @@ class PasswordManager {
     const e = this.cfg.ext.find((x) => x.hash === h);
     if (!e || e.until < Date.now()) return null;
     e.lastUse = Date.now();
+    const v = String(req.headers['x-hostwerk-ext-version'] || '');
+    if (/^\d+\.\d+\.\d+$/.test(v) && e.version !== v) { e.version = v; this.save(); }
     return e;
   }
   /* ---------- sharing with members ----------
@@ -601,6 +651,52 @@ class PasswordManager {
     return { username: it.username || '', password: it.password || '', totp: it.totp ? pwc.totp(it.totp) : null, mode };
   }
 
+  /** Version of the extension Hostwerk brings along (browser-extension/manifest.json). */
+  extVersion() { return readJson(path.join(extSource(), 'manifest.json'), {}).version || null; }
+  /** Pairing file in the extension folder: current port + folder ticket (an existing valid one is kept). */
+  writePairingFile(dir, name) {
+    const file = path.join(dir, 'hostwerk-pairing.json');
+    const old = readJson(file, {});
+    fs.writeFileSync(file, JSON.stringify({ port: this.ctx.uiPort(), ticket: this.folderTicket(old.ticket || null), name: name || old.name || 'Browser', version: this.extVersion() }));
+  }
+  /**
+   * On every start: the unpacked extension folder (if the user installed it) gets the current files and a pairing file
+   * with today's port – a browser restart or "reload" picks up updates, and pairing works again after port changes.
+   */
+  refreshExtensionFolder() {
+    const target = path.join(this.ctx.paths.base, 'browser-erweiterung', 'hostwerk-passwoerter');
+    if (!fs.existsSync(path.join(target, 'manifest.json'))) return null;
+    const run = async () => {
+      const { dir } = await this.extensionFor('chrome');
+      syncDir(dir, target);
+      this.writePairingFile(target);
+      return target;
+    };
+    return run().catch(() => null);
+  }
+  /** The extension says hello on start/after errors (no key needed): version, paired or not, what went wrong. */
+  extHello(req) {
+    const origin = String(req.headers.origin || '');
+    if (!/^(chrome|moz)-extension:\/\/[a-z0-9-]+$/i.test(origin)) throw Object.assign(new Error(T('Only for the browser extension.')), { status: 403 });
+    const b = req.body || {};
+    this.lastHello = { at: Date.now(), origin, version: /^\d+\.\d+\.\d+$/.test(String(b.version || '')) ? String(b.version) : null, paired: !!b.paired, browser: String(b.browser || '').slice(0, 40), reason: String(b.reason || '').slice(0, 30) || null };
+    broadcast({ type: 'passwords-ext' });
+    return { ok: true, latest: this.extVersion(), port: this.ctx.uiPort() };
+  }
+  /** State for the extension card in Hostwerk: paired browsers (version, last seen), waiting, last error. */
+  extState() {
+    const latest = this.extVersion();
+    const older = (v) => { if (!v || !latest) return false; const a = v.split('.').map(Number); const b = latest.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0); return false; };
+    const folder = path.join(this.ctx.paths.base, 'browser-erweiterung', 'hostwerk-passwoerter');
+    return {
+      latest,
+      folder: fs.existsSync(path.join(folder, 'manifest.json')) ? folder : null,
+      ext: this.cfg.ext.map(({ hash, via, ...e }) => ({ ...e, outdated: older(e.version), expired: e.until < Date.now() })), // eslint-disable-line no-unused-vars
+      waiting: !!(this.pairWindow && Date.now() < this.pairWindow.until),
+      hello: this.lastHello ? { ...this.lastHello, outdated: older(this.lastHello.version) } : null,
+      error: this.extPairError && Date.now() - this.extPairError.at < 3600e3 ? this.extPairError : null,
+    };
+  }
   revokeExt(id, by = 'Hostwerk') { const e = this.cfg.ext.find((x) => x.id === id); this.cfg.ext = this.cfg.ext.filter((x) => x.id !== id); this.save(); if (e) this.record(e.name, by === 'browser' ? T('Pairing removed in the browser') : T('Pairing removed')); broadcast({ type: 'passwords' }); }
   extensionZip() {
     const dir = extSource();
@@ -657,7 +753,7 @@ class PasswordManager {
       target = syncDir(dir, target) || syncDir(dir, path.join(home, `hostwerk-passwoerter-${Date.now().toString(36)}`));
       if (!target) throw new Error(T('The folder of the browser extension is locked. Please close the browser and try again.'));
       // Automatic pairing: the extension reads this file on its first start and pairs itself
-      fs.writeFileSync(path.join(target, 'hostwerk-pairing.json'), JSON.stringify({ port: this.ctx.uiPort(), ticket: this.pairTicket(), name: { chrome: 'Chrome', edge: 'Edge', brave: 'Brave', opera: 'Opera', vivaldi: 'Vivaldi' }[browser] || 'Browser' }));
+      this.writePairingFile(target, { chrome: 'Chrome', edge: 'Edge', brave: 'Brave', opera: 'Opera', vivaldi: 'Vivaldi' }[browser] || 'Browser');
     }
     const url = { chrome: 'chrome://extensions/', edge: 'edge://extensions/', brave: 'brave://extensions/', opera: 'opera://extensions/', vivaldi: 'vivaldi://extensions/' }[browser];
     // Tests never open the user's real browser
@@ -732,7 +828,7 @@ class PasswordManager {
     r.get('/pw/:id/items/:item/share', J(async (req) => ({ users: this.getShare(req.params.id, req.params.item), until: this.getShareUntil(req.params.id, req.params.item), members: this.members().filter((u) => u.role !== 'admin' && u.enabled !== false).map((u) => ({ id: u.id, name: u.name })) })));
     r.put('/pw/:id/items/:item/share', J(async (req) => this.setShare(req.params.id, req.params.item, (req.body || {}).users, (req.body || {}).until)));
     r.get('/pw/browsers', J(async () => host.core('browsers').detectBrowsers()));
-    r.get('/pw', J(async () => ({ autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), instances: this.list().map((i) => this.info(i)), providers: Object.entries(PROVIDERS).filter(([, p]) => !(p.linux && IS_WIN)).map(([id, p]) => ({ id, label: p.label, fields: p.fields, hint: p.hint, cli: p.cli || null, readonly: !!p.readonly })), catalog: this.catalog, formats: formats.allFormats().map((f) => ({ id: f.id, label: f.label })), ext: this.cfg.ext.map(({ hash, ...e }) => e), autoLockMin: this.cfg.autoLockMin ?? 15, hibp: this.cfg.audit.hibp !== false, defaultId: this.cfg.defaultId || null, types: TYPES, members: this.members().length > 0, cli: { bw: this.clis.quick('bw'), op: this.clis.quick('op') }, clipboardSec: this.cfg.clipboardSec ?? 30, icons: this.cfg.icons !== false, sshDir: (this.ctx.sshKeys && this.ctx.sshKeys.dir) || null }))); // eslint-disable-line no-unused-vars
+    r.get('/pw', J(async () => ({ autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), instances: this.list().map((i) => this.info(i)), providers: Object.entries(PROVIDERS).filter(([, p]) => !(p.linux && IS_WIN)).map(([id, p]) => ({ id, label: p.label, fields: p.fields, hint: p.hint, cli: p.cli || null, readonly: !!p.readonly, icons: this.iconSupport(id).ok, iconsWhy: this.iconSupport(id).why })), catalog: this.catalog, formats: formats.allFormats().map((f) => ({ id: f.id, label: f.label })), ext: this.cfg.ext.map(({ hash, ...e }) => e), autoLockMin: this.cfg.autoLockMin ?? 15, hibp: this.cfg.audit.hibp !== false, defaultId: this.cfg.defaultId || null, types: TYPES, members: this.members().length > 0, cli: { bw: this.clis.quick('bw'), op: this.clis.quick('op') }, clipboardSec: this.cfg.clipboardSec ?? 30, icons: this.cfg.icons !== false, sshDir: (this.ctx.sshKeys && this.ctx.sshKeys.dir) || null }))); // eslint-disable-line no-unused-vars
     r.put('/pw', (req, res) => { const b = req.body || {}; if (Number.isFinite(Number(b.autoLockMin))) { this.cfg.autoLockMin = Math.max(0, Math.min(240, Number(b.autoLockMin))); for (const s of this.stores.values()) if (s.autoLockMin !== undefined) s.autoLockMin = this.cfg.autoLockMin; } if (Number.isFinite(Number(b.clipboardSec))) this.cfg.clipboardSec = Math.max(0, Math.min(600, Number(b.clipboardSec))); if (typeof b.icons === 'boolean') this.cfg.icons = b.icons; if (typeof b.hibp === 'boolean') this.cfg.audit.hibp = b.hibp; if (typeof b.autoLogin === 'boolean') this.cfg.autoLogin = b.autoLogin; if (b.autofill && typeof b.autofill === 'object') { const a = this.autofillCfg(); for (const k of ['inline', 'onLoad', 'suggest', 'offerSave']) if (typeof b.autofill[k] === 'boolean') a[k] = b.autofill[k]; } if (b.defaultId) this.cfg.defaultId = b.defaultId; this.save(); res.json({ ok: true }); });
     r.post('/pw', J((req) => this.create(req.body || {})));
     // Anbieter-Programme: Zustand (mit Version), aktuelle Version beim Hersteller nur für benötigte
@@ -757,6 +853,7 @@ class PasswordManager {
     });
     r.post('/pw/lock-all', (req, res) => { this.lockAll(); res.json({ ok: true }); });
     r.get('/pw/ext/pair-code', (req, res) => res.json(this.pairCode()));
+    r.get('/pw/ext/state', (req, res) => res.json(this.extState()));
     // For the install display: has a browser paired since the click?
     r.get('/pw/ext/paired-since', (req, res) => { const t = Number(req.query.t) || 0; const e = this.cfg.ext.filter((x) => x.created >= t).pop(); res.json({ paired: !!e, name: e ? e.name : null }); });
     r.delete('/pw/ext/:id', (req, res) => { this.revokeExt(req.params.id); res.json({ ok: true }); });
@@ -779,6 +876,9 @@ class PasswordManager {
     r.post('/pw/:id/items/:item/restore', J((req) => { const s = this.store(req.params.id); return s.trash(req.params.item, false); }));
     r.get('/pw/:id/items/:item/totp', J(async (req) => { const it = await this.store(req.params.id).get(req.params.item); return pwc.totp(it.totp) || { error: T('No TOTP saved') }; }));
     // Anhänge (nur Hostwerk-Tresor): verschlüsselt mit dem Tresor-Schlüssel, je Datei höchstens 5 MB
+    // Eigenes Bild eines Eintrags (Hostwerk-Tresor verschlüsselt, KeePass als Custom Icon)
+    r.put('/pw/:id/items/:item/icon', J(async (req) => this.setItemIcon(req.params.id, req.params.item, (req.body || {}).data || null)));
+    r.get('/pw/:id/items/:item/icon', async (req, res, next) => { try { const ic = await this.itemIcon(req.params.id, req.params.item); if (!ic) return res.status(404).end(); res.setHeader('Content-Type', ic.mime); res.setHeader('Cache-Control', 'private, max-age=86400'); res.setHeader('X-Content-Type-Options', 'nosniff'); return res.send(ic.data); } catch (e) { return next(e); } });
     r.post('/pw/:id/items/:item/files', J(async (req) => { const b = req.body || {}; const meta = this.own(req.params.id).addAttachment(req.params.item, { name: b.name, mime: b.mime, data: b.data }); broadcast({ type: 'passwords', id: req.params.id }); this.record(`${this.get(req.params.id).name}: ${meta.name}`, T('Attachment added')); return meta; }));
     r.get('/pw/:id/items/:item/files/:att', (req, res, next) => { try { const a = this.own(req.params.id).attachment(req.params.item, req.params.att); this.record(`${this.get(req.params.id).name}: ${a.name}`, T('Attachment opened')); send(res, { name: a.name, mime: 'application/octet-stream', data: a.data }); } catch (e) { next(e); } });
     r.delete('/pw/:id/items/:item/files/:att', J(async (req) => { this.own(req.params.id).removeAttachment(req.params.item, req.params.att); broadcast({ type: 'passwords', id: req.params.id }); return { ok: true }; }));
@@ -803,20 +903,25 @@ class PasswordManager {
 
   /** Routes for the browser extension (pairing without the Hostwerk token; everything else with the extension key). */
   extRoutes(r) {
-    r.post('/pw/ext/pair', (req, res) => { try { res.json(this.pair((req.body || {}).code, req.body || {})); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
-    r.post('/pw/ext/autopair', (req, res) => { try { res.json(this.autoPair(req)); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
+    r.post('/pw/ext/pair', (req, res) => { try { res.json(this.pair((req.body || {}).code, req.body || {})); } catch (e) { res.status(e.status || 400).json({ error: e.message, reason: e.reason || null }); } });
+    r.post('/pw/ext/autopair', (req, res) => { try { res.json(this.autoPair(req)); } catch (e) { res.status(e.status || 400).json({ error: e.message, reason: e.reason || null }); } });
+    // Ist hier ein Hostwerk? (nur für Erweiterungen – Webseiten erfahren nichts) und „Hallo“ mit Version/Zustand
+    r.get('/pw/ext/ping', (req, res) => { if (!/^(chrome|moz)-extension:\/\//i.test(String(req.headers.origin || ''))) return res.status(403).json({ error: T('Only for the browser extension.') }); return res.json({ hostwerk: true, latest: this.extVersion() }); });
+    r.post('/pw/ext/hello', (req, res) => { try { res.json(this.extHello(req)); } catch (e) { res.status(e.status || 400).json({ error: e.message }); } });
     const E = (fn) => async (req, res) => { const e = this.extAuth(req); if (!e) return res.status(401).json({ error: T('Extension not paired') }); try { return res.json(await fn(req, e)); } catch (err) { return res.status(err.status || 400).json({ error: err.message }); } };
-    r.get('/pw/ext/status', E(async (req, e) => ({ ok: true, name: e.name, autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), vaults: this.list().map((i) => ({ id: i.id, name: i.name, locked: this.info(i).locked, default: this.cfg.defaultId === i.id })) })));
+    r.get('/pw/ext/status', E(async (req, e) => ({ ok: true, latest: this.extVersion(), name: e.name, autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), vaults: this.list().map((i) => ({ id: i.id, name: i.name, locked: this.info(i).locked, default: this.cfg.defaultId === i.id })) })));
     r.post('/pw/ext/unlock', E(async (req) => this.unlock((req.body || {}).id || this.cfg.defaultId, (req.body || {}).password)));
     r.get('/pw/ext/match', E(async (req) => {
       const url = String(req.query.url || ''); const out = [];
       for (const i of this.list()) {
         const s = this.stores.get(i.id); if (!s || s.locked()) continue;
         if (i.type === 'hostwerk') for (const m of s.matches(url)) out.push({ ...m, vault: i.id, vaultName: i.name });
-        else { let h = ''; try { h = new URL(url).hostname; } catch { /* ignore */ } const all = await s.all().catch(() => []); for (const it of all) if (!it.trashed && (it.urls || []).some((u) => u.includes(h))) { const { password, totp, notes, fields, ...rest } = it; out.push({ ...rest, hasTotp: !!totp, vault: i.id, vaultName: i.name }); } } // eslint-disable-line no-unused-vars
+        else { let h = ''; try { h = new URL(url).hostname; } catch { /* ignore */ } const all = await s.all().catch(() => []); for (const it of all) if (!it.trashed && (it.urls || []).some((u) => u.includes(h))) { const { password, totp, notes, fields, icon, attachments, passkeys, ssh, history, ...rest } = it; out.push({ ...rest, hasTotp: !!totp, hasIcon: !!(icon && icon.data) || !!rest.hasIcon, vault: i.id, vaultName: i.name }); } } // eslint-disable-line no-unused-vars
       }
       return { items: out, locked: this.list().filter((i) => this.info(i).locked).map((i) => ({ id: i.id, name: i.name })) };
     }));
+    // Eigenes Bild für die Liste im Popup (als data:-Adresse – das Popup schickt keinen Schlüssel mit)
+    r.get('/pw/ext/icon', E(async (req) => { const ic = await this.itemIcon(String(req.query.vault), String(req.query.item)).catch(() => null); return { data: ic ? `data:${ic.mime};base64,${ic.data.toString('base64')}` : null }; }));
     r.get('/pw/ext/fill', E(async (req, e) => { const it = await this.store(String(req.query.vault)).get(String(req.query.item)); this.record(it.name, T('Filled in in the browser ({name})', { name: e.name })); return { username: it.username, password: it.password, totp: it.totp ? pwc.totp(it.totp) : null, fields: (it.fields || []).filter((f) => !f.hidden) }; }));
     r.post('/pw/ext/save', E(async (req, e) => { const b = req.body || {}; const id = b.vault || this.cfg.defaultId; if (!id) throw new Error(T('No vault')); const it = await this.addItem(id, { type: 'login', name: b.name || b.host || T('New'), username: b.username, password: b.password, urls: [b.url].filter(Boolean), source: 'browser' }); this.record(it.name, T('Saved from the browser ({name})', { name: e.name })); return it; }));
     r.get('/pw/ext/search', E(async (req) => {
@@ -830,8 +935,8 @@ class PasswordManager {
           if (it.trashed) continue;
           const hay = [it.name, it.username, ...(it.urls || [])].join(' ').toLowerCase();
           if (!hay.includes(q)) continue;
-          const { password, totp, notes, fields, ...rest } = it; // eslint-disable-line no-unused-vars
-          out.push({ ...rest, hasTotp: !!totp, vault: i.id, vaultName: i.name });
+          const { password, totp, notes, fields, icon, attachments, passkeys, ssh, history, ...rest } = it; // eslint-disable-line no-unused-vars
+          out.push({ ...rest, hasTotp: !!totp, hasIcon: !!(icon && icon.data) || !!rest.hasIcon, vault: i.id, vaultName: i.name });
           if (out.length >= 50) break;
         }
       }

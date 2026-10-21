@@ -144,7 +144,8 @@ class KeePass {
   conv(e, groupName) {
     const url = this.val(e, 'URL'); const otp = this.val(e, 'otp') || this.val(e, 'TOTP Seed') || this.val(e, 'TimeOtp-Secret-Base32');
     const std = new Set(['Title', 'UserName', 'Password', 'URL', 'Notes', 'otp', 'TOTP Seed', 'TimeOtp-Secret-Base32']);
-    return { id: kid(e), type: 'login', name: this.val(e, 'Title') || T('(untitled)'), username: this.val(e, 'UserName'), password: this.val(e, 'Password'), urls: url ? [url] : [], totp: otp, notes: this.val(e, 'Notes'), folder: groupName, tags: e.tags || [], favorite: false, fields: [...e.fields.keys()].filter((k) => !std.has(k)).map((k) => ({ name: k, value: this.val(e, k), hidden: typeof e.fields.get(k) !== 'string' })), updated: e.times.lastModTime ? e.times.lastModTime.getTime() : null, created: e.times.creationTime ? e.times.creationTime.getTime() : null, trashed: this.db.meta.recycleBinUuid && e.parentGroup && e.parentGroup.uuid.id === this.db.meta.recycleBinUuid.id };
+    const ic = e.customIcon && this.db.meta.customIcons.get(e.customIcon.id);
+    return { hasIcon: !!ic, iconV: ic ? (ic.lastModified ? ic.lastModified.getTime() : 1) : null, id: kid(e), type: 'login', name: this.val(e, 'Title') || T('(untitled)'), username: this.val(e, 'UserName'), password: this.val(e, 'Password'), urls: url ? [url] : [], totp: otp, notes: this.val(e, 'Notes'), folder: groupName, tags: e.tags || [], favorite: false, fields: [...e.fields.keys()].filter((k) => !std.has(k)).map((k) => ({ name: k, value: this.val(e, k), hidden: typeof e.fields.get(k) !== 'string' })), updated: e.times.lastModTime ? e.times.lastModTime.getTime() : null, created: e.times.creationTime ? e.times.creationTime.getTime() : null, trashed: this.db.meta.recycleBinUuid && e.parentGroup && e.parentGroup.uuid.id === this.db.meta.recycleBinUuid.id };
   }
   need() { if (!this.db) throw Object.assign(new Error(T('The KeePass file is locked.')), { status: 423 }); }
   walk() { this.need(); const out = []; const rec = (g, name) => { for (const e of g.entries) out.push([e, name]); for (const s of g.groups) rec(s, name ? `${name}/${s.name}` : s.name); }; rec(this.db.getDefaultGroup(), ''); return out; }
@@ -155,6 +156,21 @@ class KeePass {
   async update(id, it) { const hit = this.walk().find(([e]) => kid(e) === id); if (!hit) throw Object.assign(new Error(T('Item not found')), { status: 404 }); hit[0].pushHistory(); this.fill(hit[0], { ...this.conv(hit[0], hit[1]), ...it }); await this.save(); return this.conv(hit[0], hit[1]); }
   async remove(id) { const hit = this.walk().find(([e]) => kid(e) === id); if (!hit) return; this.db.remove(hit[0]); await this.save(); }
   async sync() { await this.connect(); }
+  /** Own image: KeePass keeps it as a "custom icon" in the file – KeePass, KeePassXC and KeePassDX show it too. */
+  async setIcon(id, buf) {
+    const kdbx = ensureArgon();
+    const hit = this.walk().find(([e]) => kid(e) === id); if (!hit) throw Object.assign(new Error(T('Item not found')), { status: 404 });
+    const e = hit[0];
+    if (buf) { const u = kdbx.KdbxUuid.random(); this.db.meta.customIcons.set(u.id, { data: new Uint8Array(buf).buffer, name: this.val(e, 'Title') || 'Hostwerk', lastModified: new Date() }); e.customIcon = u; } else e.customIcon = undefined;
+    e.times.update();
+    await this.save();
+    return this.conv(e, hit[1]);
+  }
+  async getIcon(id) {
+    const hit = this.walk().find(([e]) => kid(e) === id); if (!hit) throw Object.assign(new Error(T('Item not found')), { status: 404 });
+    const ic = hit[0].customIcon && this.db.meta.customIcons.get(hit[0].customIcon.id);
+    return ic ? Buffer.from(ic.data) : null;
+  }
 }
 
 /* ================================================================ pass (Unix) and lastpass-cli */
@@ -191,6 +207,13 @@ class LastPassCli {
   async sync() { /* export sync=now */ }
 }
 
+// Eigene Bilder je Eintrag: wo das Format sie kennt (KeePass „Custom Icons“), sonst bleibt es ehrlich beim Webseiten-Symbol
+const NO_ICONS = {
+  bitwarden: 'Bitwarden only shows website icons from its own icon service – own images cannot be stored there. Hostwerk shows the website icon.',
+  onepassword: '1Password does not let programs set item images. Hostwerk shows the website icon.',
+  pass: 'pass only stores text files – there is no place for an image. Hostwerk shows the website icon.',
+  lastpass: 'LastPass through the CLI is read-only. Hostwerk shows the website icon.',
+};
 // Field labels and hints in English – the interface translates them (locales/de.json)
 const PROVIDERS = {
   bitwarden: { label: 'Bitwarden / Vaultwarden', cls: Bitwarden, native: true, cli: 'bw', fields: [['server', 'Server (empty = bitwarden.com, otherwise e.g. https://vault.example.com)', 'text'], ['email', 'E-mail', 'text'], ['password', 'Master password', 'password'], ['clientId', 'API client ID (optional, instead of a password sign-in)', 'password'], ['clientSecret', 'API client secret (optional)', 'password']], hint: 'Official program “bw” – Hostwerk loads it by itself when connecting. Works with Bitwarden accounts and self-hosted Vaultwarden (also in Hostwerk’s Docker).' },
@@ -200,4 +223,4 @@ const PROVIDERS = {
   lastpass: { label: 'LastPass (lastpass-cli)', cls: LastPassCli, native: true, readonly: true, linux: true, fields: [['email', 'E-mail', 'text'], ['password', 'Master password', 'password']], hint: 'Through lastpass-cli (Linux/macOS) – read/export only. To manage it, take it over into the Hostwerk vault. On Windows: export from LastPass and import the CSV file.' },
 };
 
-module.exports = { PROVIDERS, runCli, IS_WIN, ensureArgon };
+module.exports = { PROVIDERS, NO_ICONS, runCli, IS_WIN, ensureArgon };

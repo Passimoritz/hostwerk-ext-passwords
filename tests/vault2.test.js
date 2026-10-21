@@ -200,7 +200,7 @@ test('manager: preview counts duplicates, unencrypted export needs confirmation,
   assert.ok((await pm.exportFile(v.id, { kind: 'chrome-csv', plain: true })).data.toString().includes('p2'));
   await assert.rejects(pm.exportFile(v.id, { kind: 'bitwarden-encrypted', password: 'short' }), /8 characters/);
   const enc = await pm.exportFile(v.id, { kind: 'bitwarden-encrypted', password: 'export-pass-1' });
-  assert.ok(!enc.data.toString().includes('p2'));
+  assert.ok(!enc.data.toString().includes('b.example'), 'nothing readable in the encrypted file'); // (nicht nach „p2“ suchen – kommt zufällig im Base64 vor)
   // Sicherung: Stand anlegen, ändern, zurückholen
   const src = pm.backupSource();
   assert.ok(pm.backupVault(v.id, { force: true }));

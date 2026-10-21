@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Hostwerk Passwords",
   "description": "Passwords from your Hostwerk: suggestions in the sign-in field, fill in, save. Only talks to Hostwerk on this PC.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "permissions": [
     "storage",
     "activeTab",
