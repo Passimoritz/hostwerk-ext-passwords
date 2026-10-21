@@ -18,11 +18,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { VaultStore, TYPES } = require('./store');
-const { PROVIDERS, runCli, IS_WIN } = require('./providers');
+const { PROVIDERS, runCli, IS_WIN, ensureArgon } = require('./providers');
 const formats = require('./formats');
 const pwc = require('./crypto');
 const host = require('./host');
-const { T } = require('./i18n');
+const { T, N } = require('./i18n');
 
 const DAY = 86400000;
 const EXT_TTL = 365 * DAY;
@@ -185,7 +185,7 @@ class PasswordManager {
       if (changed && Date.now() - changed > 365 * DAY) F(it, 'old', T('Not changed for {n} months', { n: Math.round((Date.now() - changed) / DAY / 30) }), 'info');
       if (it.type === 'login' && !it.totp && (it.urls || []).some((u) => /(google|microsoft|apple|amazon|paypal|github|facebook|instagram|twitter|x\.com|bank|sparkasse|dkb|ing|comdirect|steam|discord|dropbox|cloudflare|hetzner|ionos|strato)/i.test(u))) F(it, 'no2fa', T('Important service without a saved 2FA (TOTP)'), 'warn');
       if (useHibp) {
-        try { let n = checked.get(it.password); if (n === undefined) { n = await pwc.pwned(it.password); checked.set(it.password, n); } if (n > 0) { leaked++; F(it, 'leaked', T('Showed up in {n} data leaks – change it now', { n: n.toLocaleString() }), 'err'); } } catch (e) { if (!findings.some((f) => f.kind === 'hibp-error')) findings.push({ kind: 'hibp-error', level: 'info', text: T('Leak check not possible: {msg}', { msg: e.message }), name: '', itemId: null }); break; }
+        try { let n = checked.get(it.password); if (n === undefined) { n = await pwc.pwned(it.password); checked.set(it.password, n); } if (n > 0) { leaked++; F(it, 'leaked', T('Showed up in {n} data leaks – change it now', { n: N(n) }), 'err'); } } catch (e) { if (!findings.some((f) => f.kind === 'hibp-error')) findings.push({ kind: 'hibp-error', level: 'info', text: T('Leak check not possible: {msg}', { msg: e.message }), name: '', itemId: null }); break; }
       }
     }
     const counts = { items: items.length, weak: findings.filter((f) => f.kind === 'weak').length, reused: findings.filter((f) => f.kind === 'reused').length, old: findings.filter((f) => f.kind === 'old').length, leaked, no2fa: findings.filter((f) => f.kind === 'no2fa').length };
@@ -217,6 +217,87 @@ class PasswordManager {
     if (kind === 'bitwarden-json') return { text: formats.exportBitwardenJson(items, [...new Set(items.map((x) => x.folder).filter(Boolean))]), name: `${i.name}.json`, mime: 'application/json' };
     return { text: formats.exportCsv(items, kind.replace('-csv', '')), name: `${i.name}-${kind}.csv`, mime: 'text/csv' };
   }
+  /**
+   * KeePass-Datei (.kdbx, KDBX 4 mit Argon2id) mit eigenem Passwort – Ordner werden Gruppen, 2FA-Geheimnis als „otp“,
+   * eigene Felder bleiben (geheime geschützt). Gelöschte Einträge (Papierkorb) kommen nicht mit.
+   */
+  async exportKdbx(id, password) {
+    const i = this.get(id);
+    if (typeof password !== 'string' || password.length < 8) throw Object.assign(new Error(T('The password for the KeePass file needs at least 8 characters.')), { status: 400 });
+    const kdbx = host.lib('kdbxweb');
+    ensureArgon();
+    const items = (await this.allWithSecrets(id)).filter((x) => !x.trashed);
+    const db = kdbx.Kdbx.create(new kdbx.Credentials(kdbx.ProtectedValue.fromString(password)), i.name);
+    const P = (s) => kdbx.ProtectedValue.fromString(String(s || ''));
+    const groups = new Map([['', db.getDefaultGroup()]]);
+    const groupFor = (folder) => {
+      const parts = String(folder || '').split('/').map((x) => x.trim()).filter(Boolean);
+      let key = ''; let g = db.getDefaultGroup();
+      for (const p of parts) { key = key ? `${key}/${p}` : p; if (!groups.has(key)) groups.set(key, db.createGroup(g, p)); g = groups.get(key); }
+      return g;
+    };
+    for (const it of items) {
+      const e = db.createEntry(groupFor(it.folder));
+      e.fields.set('Title', it.name || '');
+      e.fields.set('UserName', it.username || '');
+      e.fields.set('Password', P(it.password));
+      e.fields.set('URL', (it.urls || [])[0] || '');
+      const notes = [it.notes || '', ...(it.urls || []).slice(1).map((u) => `URL: ${u}`), it.card ? `${T('Card')}: ${it.card.number || ''} ${it.card.expiry || ''}`.trim() : ''].filter(Boolean).join('\n');
+      e.fields.set('Notes', notes);
+      if (it.totp) e.fields.set('otp', P(it.totp));
+      for (const f of it.fields || []) if (f && f.name && !['Title', 'UserName', 'Password', 'URL', 'Notes', 'otp'].includes(f.name)) e.fields.set(String(f.name), f.hidden ? P(f.value) : String(f.value || ''));
+      e.tags = Array.isArray(it.tags) ? it.tags : [];
+    }
+    const data = Buffer.from(await db.save());
+    this.record(i.name, T('Export ({kind}, {n} items)', { kind: 'kdbx', n: items.length }));
+    return { data, name: `${i.name}.kdbx`, mime: 'application/octet-stream' };
+  }
+
+  /**
+   * Tresor als Dienst für andere Erweiterungen (host.use('passwordVault')): Dateifreigabe, Mailserver, Router,
+   * Cloud-Sicherung … legen Zugangsdaten mit einem Aufruf im Standard-Tresor ab. Lesen geht nur über die eigene
+   * Kennung (source) – fremde Einträge sieht eine Erweiterung nie.
+   */
+  vaultService() {
+    const pick = () => {
+      const id = this.cfg.defaultId && this.list().some((x) => x.id === this.cfg.defaultId) ? this.cfg.defaultId : (this.list()[0] || {}).id;
+      return id ? this.get(id) : null;
+    };
+    const state = () => { const v = pick(); return v ? { available: true, vault: { id: v.id, name: v.name }, locked: !!this.info(v).locked, readonly: !!(PROVIDERS[v.type] && PROVIDERS[v.type].readonly) } : { available: false, vault: null, locked: false, readonly: false }; };
+    const need = () => {
+      const s = state();
+      if (!s.available) throw Object.assign(new Error(T('No vault yet – create one under Passwords first.')), { status: 409 });
+      if (s.readonly) throw Object.assign(new Error(T('This provider is read-only.')), { status: 409 });
+      if (s.locked) throw Object.assign(new Error(T('The vault “{name}” is locked – unlock it under Passwords first.', { name: s.vault.name })), { status: 423 });
+      return s.vault;
+    };
+    const mine = async (vault, source, key) => (await this.allWithSecrets(vault.id)).find((x) => !x.trashed && x.source === source && (x.fields || []).some((f) => f.name === 'hostwerk-key' && f.value === key));
+    return {
+      status: state,
+      /**
+       * Zugang ablegen oder aktualisieren. item = { key, source, name, username, password, url, notes, folder }
+       * key + source machen ihn eindeutig (z. B. source 'file-share', key 'sftp:alex') – erneutes Speichern ersetzt das
+       * Passwort (das alte bleibt im Verlauf). → { id, vault, updated }
+       */
+      save: async (item = {}) => {
+        const source = String(item.source || '').slice(0, 40); const key = String(item.key || item.name || '').slice(0, 120);
+        if (!/^[a-z0-9][a-z0-9-]{1,39}$/.test(source)) throw Object.assign(new Error('save: "source" is the id of the calling extension'), { status: 400 });
+        if (!key || !item.password) throw Object.assign(new Error('save: "key" and "password" are needed'), { status: 400 });
+        const vault = need();
+        const old = await mine(vault, source, key);
+        // Beim Aktualisieren bleibt, was der Aufrufer nicht mitschickt (Adresse, Notizen, Benutzer)
+        const body = { type: 'login', name: String(item.name || (old && old.name) || key).slice(0, 120), username: String(item.username ?? (old && old.username) ?? ''), password: String(item.password), urls: item.url ? [String(item.url)] : (old && old.urls) || [], notes: String(item.notes ?? (old && old.notes) ?? ''), folder: String(item.folder || 'Hostwerk'), source, fields: [{ name: 'hostwerk-key', value: key, hidden: false }] };
+        const it = old ? await this.updateItem(vault.id, old.id, body) : await this.addItem(vault.id, body);
+        this.record(`${vault.name}: ${body.name}`, T(old ? 'Access updated by the extension {ext}' : 'Access saved by the extension {ext}', { ext: source }));
+        return { id: it.id, vault: vault.id, updated: !!old };
+      },
+      /** Gibt es den Zugang schon? Ohne Passwort. → { id, name, username, url } oder null */
+      find: async ({ source, key } = {}) => { const vault = need(); const it = await mine(vault, String(source || ''), String(key || '')); return it ? { id: it.id, name: it.name, username: it.username || '', url: (it.urls || [])[0] || '' } : null; },
+      /** Den eigenen Zugang wieder herausgeben (z. B. um sich anzumelden) – nur für die eigene source, wird protokolliert. */
+      reveal: async ({ source, key } = {}) => { const vault = need(); const it = await mine(vault, String(source || ''), String(key || '')); if (!it) return null; this.record(`${vault.name}: ${it.name}`, T('Access read by the extension {ext}', { ext: source })); return { username: it.username || '', password: it.password || '' }; },
+    };
+  }
+
   /** Copy items between vaults (e.g. Bitwarden → Hostwerk vault). */
   async transfer(from, to, { ids = null } = {}) {
     const items = (await this.allWithSecrets(from)).filter((x) => !ids || ids.includes(x.id));
@@ -570,9 +651,10 @@ class PasswordManager {
     r.get('/pw/:id/tags', J((req) => { const s = this.store(req.params.id); return s.tags ? s.tags() : []; }));
     r.post('/pw/:id/trash/empty', J((req) => ({ removed: this.store(req.params.id).emptyTrash() })));
     r.post('/pw/:id/audit', J((req) => this.audit(req.params.id, req.body || {})));
+    r.get('/pw/:id/audit', J(async (req) => { const v = this.get(req.params.id); return { vault: { id: v.id, name: v.name, locked: !!this.info(v).locked }, last: this.audits.get(v.id) || null }; }));
     r.post('/pw/:id/import', J((req) => this.importText(req.params.id, String((req.body || {}).text || ''), req.body || {})));
     r.post('/pw/:id/import-preview', (req, res) => { const p = formats.detectAndParse(String((req.body || {}).text || '')); res.json({ format: p.format, label: p.label, count: p.items.length, sample: p.items.slice(0, 5).map(({ password, totp, ...x }) => ({ ...x, hasPassword: !!password })) }); }); // eslint-disable-line no-unused-vars
-    r.post('/pw/:id/export', async (req, res) => { const e = await this.exportText(req.params.id, (req.body || {}).kind); res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(e.name)}"`); res.type(e.mime); res.send(e.text); });
+    r.post('/pw/:id/export', async (req, res) => { if ((req.body || {}).kind === 'kdbx') { const k = await this.exportKdbx(req.params.id, (req.body || {}).password); res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(k.name)}"`); res.type(k.mime); res.send(k.data); return; } const e = await this.exportText(req.params.id, (req.body || {}).kind); res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(e.name)}"`); res.type(e.mime); res.send(e.text); });
     r.post('/pw/:id/transfer', J((req) => this.transfer(req.params.id, (req.body || {}).to, req.body || {})));
     r.post('/pw/:id/sync', J(async (req) => { const s = this.store(req.params.id); if (s.sync) await s.sync(); return { ok: true }; }));
   }

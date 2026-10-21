@@ -6,10 +6,10 @@
     "en": "Password manager"
   },
   "description": {
-    "de": "Eigener verschlüsselter Tresor oder Bitwarden/Vaultwarden, 1Password, KeePass, pass und LastPass – mit Browser-Erweiterung, Sicherheitsprüfung (Have I Been Pwned), 2FA-Codes, Generator, Teilen mit Mitgliedern und Import aus allen gängigen Diensten.",
-    "en": "Own encrypted vault or Bitwarden/Vaultwarden, 1Password, KeePass, pass and LastPass – with browser extension, security check (Have I Been Pwned), 2FA codes, generator, sharing with members and import from every common service."
+    "de": "Eigener verschlüsselter Tresor oder Bitwarden/Vaultwarden, 1Password, KeePass, pass und LastPass – mit Browser-Erweiterung, Sicherheitsprüfung (Have I Been Pwned, auch als Kachel), 2FA-Codes, Generator, Teilen mit Mitgliedern, Import aus allen gängigen Diensten, Export als KeePass-Datei und Tresor-Dienst für andere Erweiterungen.",
+    "en": "Own encrypted vault or Bitwarden/Vaultwarden, 1Password, KeePass, pass and LastPass – with browser extension, security check (Have I Been Pwned, also as a tile), 2FA codes, generator, sharing with members, import from every common service, export as a KeePass file and a vault service for other extensions."
   },
-  "version": "1.0.2",
+  "version": "1.1.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-passwords",
   "license": "MIT",
@@ -30,12 +30,41 @@
       "de": "Tresore, Browser-Erweiterung, Sicherheitsprüfung.",
       "en": "Vaults, browser extension, security check."
     },
-    "icon": "key"
+    "icon": "key",
+    "nav": {
+      "group": "system",
+      "after": "live"
+    }
   },
   "backend": "server/index.js",
   "ui": "ui/index.js",
   "screenshots": [
     "docs/screenshot.png",
     "docs/screenshot.de.png"
-  ]
+  ],
+  "provides": [
+    "pw",
+    "passwordVault"
+  ],
+  "synergies": [
+    {
+      "with": "file-share",
+      "title": {
+        "de": "SFTP-Zugänge im Tresor ablegen",
+        "en": "Keep SFTP logins in the vault"
+      }
+    },
+    {
+      "with": "mail-server",
+      "title": {
+        "de": "Postfach-Passwörter im Tresor ablegen",
+        "en": "Keep mailbox passwords in the vault"
+      }
+    }
+  ],
+  "allowExtensions": {
+    "*": [
+      "tabs"
+    ]
+  }
 }

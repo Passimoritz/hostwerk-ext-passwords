@@ -1,12 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { KeyRound, Lock, Unlock, Plus, Star, Trash2, Copy, RefreshCw, ShieldCheck, Upload, Download, Puzzle, Settings2, Link2, EyeOff } from 'lucide-react';
 import { get, post, put, del, useApi, on, waitJob, fmtDate, HAS_DESKTOP } from '@hostwerk/api';
-import { Btn, Tabs, Field, Switch, SettingRow, Seg, Empty, Loading, Callout, Modal, toast, promptDialog, InfoTip, PathInput } from '@hostwerk/ui';
+import { Btn, Tabs, Field, Switch, SettingRow, Seg, Empty, Loading, Callout, Modal, toast, promptDialog, InfoTip, PathInput, TileEmpty } from '@hostwerk/ui';
 import { SvcImage, contextMenu, useNew, FavMark, favSort, favMenuItem } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
 import { VaultView, REQUIRED, fieldLabel, clearLater } from './Vault';
 import { SharedWithMe } from './Share';
-import { ExtGuide, ExtLinked, extSteps, BrowserMark } from './Guide';
+import { ExtGuide, ExtLinked, extSteps, BrowserMark, BROWSER_COLORS } from './Guide';
 import './style.css';
 
 /*
@@ -90,7 +90,7 @@ function ExtensionCard({ data, reload }) {
   useEffect(() => { if (!pickedOnce.current && det.data) { pickedOnce.current = true; if (found[0] && BROWSERS.some((b) => b.id === found[0].id)) setBrowserRaw(found[0].id); else setBrowserRaw('chrome'); } }, [det.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const setBrowser = (b) => { pickedOnce.current = true; setBrowserRaw(b); };
   const browserOpts = [...BROWSERS].sort((a, b) => Number(found.some((f) => f.id === b.id)) - Number(found.some((f) => f.id === a.id)))
-    .map((b) => { const f = found.find((x) => x.id === b.id); return { id: b.id, label: <span className={`br-opt ${f ? 'have' : 'miss'}`}><span className={`br-dot br-${b.id}`} />{b.label}{f && f.default ? <span className="br-def">{t('Default')}</span> : null}</span> }; });
+    .map((b) => { const f = found.find((x) => x.id === b.id); return { id: b.id, label: <span className={`br-opt ${f ? 'have' : 'miss'}`}><span className="br-dot" style={{ '--br': BROWSER_COLORS[b.id] }} />{b.label}{f && f.default ? <span className="br-def">{t('Default')}</span> : null}</span> }; });
   const [inst, setInst] = useState(null);
   const [busy, setBusy] = useState(false);
   const fx = browser === 'firefox';
@@ -259,6 +259,40 @@ function CfgDialog({ v, data, onClose, onDone }) {
   );
 }
 
+/**
+ * Kachel „Sicherheitsprüfung“ (Übersicht): Ergebnis der letzten Prüfung des Standard-Tresors – schwache, mehrfach
+ * genutzte und geleakte Passwörter. „Jetzt prüfen“ startet die Prüfung (mit Leak-Abgleich, falls eingeschaltet).
+ */
+function SecurityTile() {
+  const d = useApi('/pw', [], { live: false });
+  const vault = d.data && (d.data.instances.find((x) => x.default) || d.data.instances[0]);
+  const last = useApi(vault ? `/pw/${vault.id}/audit` : null, [vault && vault.id], { live: false });
+  const [busy, setBusy] = useState(false);
+  if (d.error && !d.data) return <TileEmpty icon={ShieldCheck} text={t('Could not load the vaults')} action={t('Try again')} onClick={() => d.reload()} />;
+  if (!d.data) return <div className="card-body"><Loading /></div>;
+  if (!vault) return <TileEmpty icon={KeyRound} text={t('No vault yet')} action={t('Create vault')} href="#/passwoerter" />;
+  const open = `#/passwoerter/${encodeURIComponent(vault.id)}/audit`;
+  if (vault.locked) return <TileEmpty icon={Lock} text={t('“{name}” is locked – unlock it to check.', { name: vault.name })} action={t('Unlock')} href={open} />;
+  const r = last.data && last.data.last;
+  const check = async () => { setBusy(true); try { const x = await post(`/pw/${vault.id}/audit`); last.setData({ ...(last.data || {}), last: x }); } catch (e) { toast.error(e); } setBusy(false); };
+  if (!r) return <TileEmpty icon={ShieldCheck} text={t('Not checked yet')} action={t('Check now')} onClick={check} />;
+  const bad = r.counts.weak + r.counts.reused + r.counts.leaked;
+  return (
+    <div className="card-body stack pw-tile">
+      <div className="row-tight"><span className={`pw-tile-score ${r.score >= 90 ? 'c-ok' : r.score >= 60 ? 'c-warn' : 'c-err'}`}>{r.score}</span><span className="small muted grow">{t('of 100 · {name}', { name: vault.name })}</span></div>
+      <div className="row-tight pw-tile-counts">
+        <span className={`badge ${r.counts.leaked ? 'err' : ''}`}>{t('{n} leaked', { n: r.counts.leaked })}</span>
+        <span className={`badge ${r.counts.weak ? 'warn' : ''}`}>{t('{n} weak', { n: r.counts.weak })}</span>
+        <span className={`badge ${r.counts.reused ? 'warn' : ''}`}>{t('{n} reused', { n: r.counts.reused })}</span>
+      </div>
+      <div className="row-tight"><span className="tiny muted grow">{bad ? t('Checked {when}', { when: fmtDate(r.at) }) : t('All good – checked {when}', { when: fmtDate(r.at) })}</span><Btn className="xs" icon={RefreshCw} busy={busy} onClick={check}>Check now</Btn><a className="btn xs" href={open}>Details</a></div>
+    </div>
+  );
+}
+
 export default {
   pages: { main: PasswordsPage },
+  slots: {
+    'dashboard.tiles': [{ id: 'security', title: 'Password check', icon: ShieldCheck, size: 'third', Component: SecurityTile }],
+  },
 };

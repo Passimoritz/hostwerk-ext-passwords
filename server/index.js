@@ -10,6 +10,8 @@ const { PasswordManager } = require('./manager');
 exports.activate = (h) => {
   host.bind(h);
   const pw = h.provide('pw', new PasswordManager(h.ctx));
+  // Tresor als Dienst: andere Erweiterungen legen Zugänge mit host.use('passwordVault') ab
+  h.provide('passwordVault', pw.vaultService());
   pw.routes(h.router);
   pw.extRoutes(h.publicRouter);
   h.on('shutdown', () => pw.stop());

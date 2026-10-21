@@ -13,11 +13,24 @@ Own encrypted vault on this PC or a connection to the password manager you alrea
 - Hostwerk vault: AES-256-GCM, key from the master password (scrypt), locks itself after being idle
 - Logins, notes, cards and identities with folders, tags, favourites, password history and trash
 - 2FA codes (TOTP), password generator and passphrases
-- Security check: weak, reused, old and leaked passwords (Have I Been Pwned with k-anonymity) and important services without 2FA
-- Import from 18 formats, export as Bitwarden JSON or CSV, copy between vaults
+- Security check: weak, reused, old and leaked passwords (Have I Been Pwned with k-anonymity) and important services without 2FA – also as a dashboard tile “Password check”
+- Import from 18 formats, export as Bitwarden JSON, CSV or an encrypted **KeePass file (.kdbx)** with its own password, copy between vaults
 - Browser extension for Chrome, Edge, Firefox, Brave, Opera and Vivaldi – pairs itself, suggestions right in the sign-in field
 - Share single logins with members (needs “Team & users”), also time-limited
+- **Vault service for other extensions**: file share, mail server, router or cloud backup keep their logins in the vault with one call – each extension only ever sees its own entries
 - Provider programs (bw, op) are checked every day and updated with a test run
+
+## For other extensions
+
+```js
+const vault = await host.use('passwordVault');
+vault.status();                                         // { available, vault: { id, name }, locked, readonly }
+await vault.save({ source: 'file-share', key: 'sftp:alex', name: 'SFTP alex', username: 'alex', password, url: 'sftp://pc:2222' });
+await vault.find({ source: 'file-share', key: 'sftp:alex' });    // without the password
+await vault.reveal({ source: 'file-share', key: 'sftp:alex' });  // { username, password } – logged in the change log
+```
+
+Saving the same `source` + `key` again updates the entry (the old password stays in its history). A locked vault answers with status 423 and a message to unlock it under Passwords.
 
 ## Install
 

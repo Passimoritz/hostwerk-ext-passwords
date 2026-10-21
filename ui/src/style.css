@@ -25,8 +25,7 @@
 .br-opt.miss .br-dot { opacity: .45; }
 .br-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
 .br-opt.have .br-dot { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent); }
-.br-opt.have .br-chrome { background: #34a853; } .br-opt.have .br-edge { background: #0ea5e9; } .br-opt.have .br-firefox { background: #ff7139; }
-.br-opt.have .br-brave { background: #fb542b; } .br-opt.have .br-opera { background: #ff1b2d; } .br-opt.have .br-vivaldi { background: #ef3939; }
+.br-opt.have .br-dot { background: var(--br, var(--accent)); }
 .br-def { font-size: 10px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-text); }
 
 /* ---------- Browser extension: step cards + connected picture (Guide.jsx) ---------- */
@@ -37,8 +36,8 @@
 @keyframes xg-glow { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 6%, transparent); } }
 .xg-pic { position: relative; height: 54px; display: grid; place-items: center; border-radius: 9px; background: var(--bg-3, var(--bg)); }
 .xg-art { width: 72px; height: 50px; overflow: visible; }
-.xg-n { position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; background: var(--accent); color: #fff; }
-.xg.done .xg-n { background: var(--ok, #2e8a57); }
+.xg-n { position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; background: var(--accent); color: var(--accent-contrast); }
+.xg.done .xg-n { background: var(--ok); }
 .xg-tx { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; line-height: 1.35; }
 .xg-tx span { color: var(--muted); font-size: 11.5px; }
 .xg-frame { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5; }
@@ -57,13 +56,13 @@
 @keyframes xg-tog-bg { 0%, 30% { fill: var(--line-2); } 45%, 90% { fill: var(--accent); } 100% { fill: var(--line-2); } }
 .xg-lid { fill: color-mix(in srgb, var(--accent) 20%, var(--bg)); stroke: var(--accent); stroke-width: 1.8; transform-box: fill-box; transform-origin: bottom; animation: xg-lid 2.6s ease-in-out infinite; }
 @keyframes xg-lid { 0%, 25% { transform: skewX(0) scaleY(1); } 45%, 85% { transform: skewX(-12deg) scaleY(.82); } }
-.xg-tick { fill: none; stroke: var(--ok, #2e8a57); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 20; stroke-dashoffset: 20; animation: xg-tick 2.6s ease-in-out infinite; }
+.xg-tick { fill: none; stroke: var(--ok); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 20; stroke-dashoffset: 20; animation: xg-tick 2.6s ease-in-out infinite; }
 @keyframes xg-tick { 0%, 50% { stroke-dashoffset: 20; } 70%, 100% { stroke-dashoffset: 0; } }
 .xg-wire { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 4 4; fill: none; animation: xg-flow .8s linear infinite; }
 @keyframes xg-flow { to { stroke-dashoffset: -8; } }
-.xg.done .xg-wire { stroke: var(--ok, #2e8a57); stroke-dasharray: none; animation: none; }
+.xg.done .xg-wire { stroke: var(--ok); stroke-dasharray: none; animation: none; }
 
-.xl { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--ok, #2e8a57) 45%, var(--line)); background: color-mix(in srgb, var(--ok, #2e8a57) 8%, var(--bg-2)); animation: xg-in .4s ease-out both; flex-wrap: wrap; }
+.xl { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 8%, var(--bg-2)); animation: xg-in .4s ease-out both; flex-wrap: wrap; }
 .xl > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
 .xl > div span { color: var(--muted); font-size: 12px; }
 .xl-art { width: 200px; max-width: 100%; height: 64px; flex: none; }
@@ -71,14 +70,19 @@
 .xl-hw { stroke: var(--accent); }
 .xl-globe, .xl-key { fill: none; stroke: var(--muted); stroke-width: 2; stroke-linecap: round; }
 .xl-key { stroke: var(--accent); }
-.xl-wire { stroke: var(--ok, #2e8a57); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 96; stroke-dashoffset: 96; animation: xl-draw .7s ease-out .15s forwards; }
-.xl-ok { fill: var(--ok, #2e8a57); transform-box: fill-box; transform-origin: center; transform: scale(0); animation: xl-pop .35s cubic-bezier(.3, 1.6, .5, 1) .75s forwards; }
+.xl-wire { stroke: var(--ok); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 96; stroke-dashoffset: 96; animation: xl-draw .7s ease-out .15s forwards; }
+.xl-ok { fill: var(--ok); transform-box: fill-box; transform-origin: center; transform: scale(0); animation: xl-pop .35s cubic-bezier(.3, 1.6, .5, 1) .75s forwards; }
 .xl-tick { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 20; stroke-dashoffset: 20; animation: xl-draw .3s ease-out 1s forwards; }
 @keyframes xl-draw { to { stroke-dashoffset: 0; } }
 @keyframes xl-pop { to { transform: scale(1); } }
 .br-mark { display: inline-grid; place-items: center; flex: none; border-radius: 7px; color: #fff; font-weight: 700; font-size: 11px; }
 .pw-ext-list { display: flex; flex-direction: column; gap: 6px; }
 .pw-ext-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; animation: xg-in .3s ease-out both; }
-.pw-ext-row .live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #2e8a57); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok, #2e8a57) 20%, transparent); }
+.pw-ext-row .live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
 @media (prefers-reduced-motion: reduce) { .xg-step, .xg-pop, .xg-toggle, .xg-knob, .xg-lid, .xg-tick, .xg-wire, .xl, .pw-ext-row { animation: none !important; } .xl-wire, .xl-tick { stroke-dashoffset: 0; animation: none !important; } .xl-ok { transform: none; animation: none !important; } }
 .pw-shared-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+
+/* Kachel „Sicherheitsprüfung“ */
+.pw-tile { gap: var(--sp-2); }
+.pw-tile-score { font-size: var(--fs-2xl); font-weight: 700; line-height: 1; }
+.pw-tile-counts { flex-wrap: wrap; }

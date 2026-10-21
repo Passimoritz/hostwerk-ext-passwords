@@ -13,11 +13,24 @@ Eigener verschlüsselter Tresor auf diesem PC oder die Anbindung an den Passwort
 - Hostwerk-Tresor: AES-256-GCM, Schlüssel aus dem Master-Passwort (scrypt), sperrt sich nach Leerlauf selbst
 - Zugänge, Notizen, Karten und Identitäten mit Ordnern, Schlagwörtern, Favoriten, Passwort-Verlauf und Papierkorb
 - 2FA-Codes (TOTP), Passwort-Generator und Passphrasen
-- Sicherheitsprüfung: schwache, doppelte, alte und geleakte Passwörter (Have I Been Pwned mit k-Anonymität) und wichtige Dienste ohne 2FA
-- Import aus 18 Formaten, Export als Bitwarden-JSON oder CSV, Kopieren zwischen Tresoren
+- Sicherheitsprüfung: schwache, mehrfach genutzte, alte und geleakte Passwörter (Have I Been Pwned mit k-Anonymität) und wichtige Dienste ohne 2FA – auch als Kachel „Passwort-Prüfung“ in der Übersicht
+- Import aus 18 Formaten, Export als Bitwarden-JSON, CSV oder verschlüsselte **KeePass-Datei (.kdbx)** mit eigenem Passwort, Kopieren zwischen Tresoren
 - Browser-Erweiterung für Chrome, Edge, Firefox, Brave, Opera und Vivaldi – koppelt sich selbst, Vorschläge direkt im Anmeldefeld
 - Einzelne Zugänge mit Mitgliedern teilen (braucht „Team & Benutzer“), auch befristet
+- **Tresor als Dienst für andere Erweiterungen**: Dateifreigabe, Mailserver, Router oder Cloud-Sicherung legen ihre Zugänge mit einem Aufruf im Tresor ab – jede Erweiterung sieht nur ihre eigenen Einträge
 - Anbieter-Programme (bw, op) werden täglich geprüft und mit Probelauf aktualisiert
+
+## Für andere Erweiterungen
+
+```js
+const vault = await host.use('passwordVault');
+vault.status();                                         // { available, vault: { id, name }, locked, readonly }
+await vault.save({ source: 'file-share', key: 'sftp:alex', name: 'SFTP alex', username: 'alex', password, url: 'sftp://pc:2222' });
+await vault.find({ source: 'file-share', key: 'sftp:alex' });    // ohne Passwort
+await vault.reveal({ source: 'file-share', key: 'sftp:alex' });  // { username, password } – landet im Änderungsprotokoll
+```
+
+Erneutes Speichern mit derselben `source` + `key` aktualisiert den Eintrag (das alte Passwort bleibt in seinem Verlauf). Ein gesperrter Tresor antwortet mit Status 423 und dem Hinweis, ihn unter „Passwörter“ zu entsperren.
 
 ## Installieren
 

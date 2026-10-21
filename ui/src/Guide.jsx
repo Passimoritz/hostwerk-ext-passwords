@@ -77,8 +77,13 @@ export function extSteps({ mode, fx, label, registered }) {
   ];
 }
 
-/** Small browser mark (colour circle + first letter) for lists. */
+/**
+ * Markenfarben der Browser – bewusst fest: Sie stehen nur im kleinen Browser-Zeichen (wie ein Logo) und helfen, den
+ * eigenen Browser in der Liste wiederzuerkennen. Nie für Knöpfe, Text oder Zustände – dafür gilt die Akzentfarbe.
+ */
+export const BROWSER_COLORS = { chrome: '#34a853', edge: '#0ea5e9', firefox: '#ff7139', brave: '#fb542b', opera: '#ff1b2d', vivaldi: '#ef3939', safari: '#1d9bf0' };
+
+/** Small browser mark (colour circle + first letter) for lists – decoration only (aria-hidden), the name stands next to it. */
 export function BrowserMark({ id, size = 22 }) {
-  const c = { chrome: '#34a853', edge: '#0ea5e9', firefox: '#ff7139', brave: '#fb542b', opera: '#ff1b2d', vivaldi: '#ef3939', safari: '#1d9bf0' }[id] || '#8b8f97';
-  return <span className="br-mark" style={{ width: size, height: size, background: c }} aria-hidden="true">{(id || '?')[0].toUpperCase()}</span>;
+  return <span className="br-mark" style={{ width: size, height: size, background: BROWSER_COLORS[id] || 'var(--muted)' }} aria-hidden="true">{(id || '?')[0].toUpperCase()}</span>;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { KeyRound, Lock, Unlock, Plus, Search, Star, Trash2, Copy, Eye, EyeOff, RefreshCw, ShieldCheck, Upload, Download, Globe, Folder, StickyNote, CreditCard, User, Wand2, AlertTriangle, XCircle, CheckCircle2, Info, Clock, ExternalLink, History, ArrowRightLeft, Settings2, Link2, Users } from 'lucide-react';
 import { get, post, put, del, on, fmtDate, openExternal } from '@hostwerk/api';
-import { Btn, Tabs, Field, Seg, Empty, Loading, Callout, Modal, toast, confirmDialog, DropZone, InfoTip } from '@hostwerk/ui';
+import { Btn, Tabs, Field, Seg, Empty, Loading, Callout, Modal, toast, confirmDialog, promptDialog, DropZone, InfoTip } from '@hostwerk/ui';
 import { SvcImage, AiHint } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
 import { ShareDialog } from './Share';
@@ -208,7 +208,7 @@ export function VaultView({ v, data, reload, initialTab, onCfg }) {
   );
 }
 
-const EXPORTS = [['bitwarden-json', 'Bitwarden/Vaultwarden (JSON)'], ['bitwarden-csv', 'Bitwarden (CSV)'], ['chrome-csv', 'Chrome / Edge / Google / Apple (CSV)'], ['keepass-csv', 'KeePass (CSV)'], ['generic-csv', 'General (CSV)']];
+const EXPORTS = [['kdbx', 'KeePass (.kdbx, encrypted)'], ['bitwarden-json', 'Bitwarden/Vaultwarden (JSON)'], ['bitwarden-csv', 'Bitwarden (CSV)'], ['chrome-csv', 'Chrome / Edge / Google / Apple (CSV)'], ['keepass-csv', 'KeePass (CSV)'], ['generic-csv', 'General (CSV)']];
 const WAY = { import: 'Import/export', manual: 'by hand', 'native-readonly': 'read', native: 'direct' };
 
 function ImportExport({ v, data, onDone }) {
@@ -219,7 +219,11 @@ function ImportExport({ v, data, onDone }) {
   const others = data.instances.filter((x) => x.id !== v.id && !x.locked && !x.readonly);
   const onFile = async (files) => { const x = await files[0].text(); setText(x); try { setPreview(await post(`/pw/${v.id}/import-preview`, { text: x })); } catch (e) { toast.error(e.message); setPreview(null); } };
   const doImport = async () => { setBusy(true); try { const r = await post(`/pw/${v.id}/import`, { text }); toast.success(r.skipped ? t('{n} items imported ({label}), {s} duplicates skipped', { n: r.added, label: r.label, s: r.skipped }) : t('{n} items imported ({label})', { n: r.added, label: r.label })); setPreview(null); setText(''); onDone(); } catch (e) { toast.error(e.message); } setBusy(false); };
-  const doExport = async (kind) => { const res = await fetch(`/api/pw/${v.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind }) }); if (!res.ok) { toast.error((await res.json()).error); return; } const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); const m = (res.headers.get('content-disposition') || '').match(/filename="([^"]+)"/); a.download = m ? decodeURIComponent(m[1]) : 'export'; a.click(); };
+  const doExport = async (kind) => {
+    // KeePass-Datei: eigenes Passwort für die Datei (sie ist verschlüsselt, anders als CSV/JSON)
+    let password;
+    if (kind === 'kdbx') { password = await promptDialog({ title: t('Password for the KeePass file'), text: t('KeePass and KeePassXC open the file with this password. At least 8 characters – it can differ from your master password.'), label: t('Password'), password: true, confirm: t('Export'), validate: (x) => (String(x || '').length < 8 ? t('At least 8 characters') : null) }); if (!password) return; }
+    const res = await fetch(`/api/pw/${v.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind, password }) }); if (!res.ok) { toast.error((await res.json()).error); return; } const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); const m = (res.headers.get('content-disposition') || '').match(/filename="([^"]+)"/); a.download = m ? decodeURIComponent(m[1]) : 'export'; a.click(); };
   const cat = (data.catalog && data.catalog.providers) || [];
   return (
     <div className="grid grid-2">
