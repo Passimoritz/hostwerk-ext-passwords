@@ -10,15 +10,24 @@ Own encrypted vault on this PC or a connection to the password manager you alrea
 
 ## What it does
 
-- Hostwerk vault: AES-256-GCM, key from the master password (scrypt), locks itself after being idle
-- Logins, notes, cards and identities with folders, tags, favourites, password history and trash
-- 2FA codes (TOTP), password generator and passphrases
-- Security check: weak, reused, old and leaked passwords (Have I Been Pwned with k-anonymity) and important services without 2FA – also as a dashboard tile “Password check”
-- Import from 18 formats, export as Bitwarden JSON, CSV or an encrypted **KeePass file (.kdbx)** with its own password, copy between vaults
+- Hostwerk vault (format 3): a random vault key encrypts everything with AES-256-GCM, the master password (Argon2id, 64 MiB) only wraps that key – a new master password never re-encrypts attachments; older vaults are lifted quietly on unlock; every write is atomic. Locks itself after being idle
+- Three columns like a real password manager: navigation (all, favourites, logins, notes, cards, identities, SSH keys, passkeys, files, folders, tags, trash), list with website icons (cached locally) and a strength dot, detail with copy buttons. Keyboard: Ctrl+F, ↑/↓, Ctrl+C (password), Ctrl+Shift+C (username)
+- 2FA codes (TOTP) with a countdown ring – the QR code is read from an image or the clipboard
+- SSH keys (create ed25519 or paste, public part + fingerprint, hand over to Hostwerk’s SSH keys), passkeys (kept, shown, exported to Bitwarden and KeePassXC), encrypted attachments (5 MB each, 50 MB per vault), extra fields, password history
+- Generator for characters or passphrases, with **rules per site** (also used by the browser extension); the clipboard is cleared after a time you choose
+- Security report: weak, reused, old and leaked passwords (Have I Been Pwned with k-anonymity, can be switched off) and important services without 2FA – also as a dashboard tile “Password check”
+- Import: CSV/JSON of every common service, **KeePass .kdbx and XML**, **1Password .1pux**, **Bitwarden JSON with password**, Enpass JSON, any CSV with your own column assignment – with preview and duplicate detection
+- Export encrypted (KeePass .kdbx, Bitwarden JSON with password); unencrypted only after a clear warning. Copy between vaults
+- Daily encrypted backups (14 kept) in Hostwerk’s backup centre, including restore
 - Browser extension for Chrome, Edge, Firefox, Brave, Opera and Vivaldi – pairs itself, suggestions right in the sign-in field
 - Share single logins with members (needs “Team & users”), also time-limited
 - **Vault service for other extensions**: file share, mail server, router or cloud backup keep their logins in the vault with one call – each extension only ever sees its own entries
-- Provider programs (bw, op) are checked every day and updated with a test run
+
+## Providers without extra installs
+
+Bitwarden/Vaultwarden and 1Password only let other programs in through their official command-line programs (`bw`, `op`). You never have to install them: Hostwerk loads the program **when you connect** – `bw` from Bitwarden’s GitHub release (SHA-256 of the release + Windows signature “Bitwarden Inc.”), `op` from cache.agilebits.com (Windows signature “AgileBits”) – into its own `bin` folder, tests it with `--version` (own data folder) and keeps it current: every new version gets a test run first, a broken one is skipped and the last working one stays. If Windows’ Smart App Control blocks a program, Hostwerk says so plainly and offers the import as a way around.
+
+Only set-up providers count: without a Bitwarden or 1Password vault nothing is downloaded, checked or reported. KeePass is read and written directly; pass and lastpass-cli come from the Linux/macOS package manager; Google, Apple, Proton, Dashlane, NordPass & co. come by import.
 
 ## For other extensions
 
@@ -40,7 +49,7 @@ Native extensions run as part of Hostwerk (own server and interface part). That 
 
 ## Data
 
-`settings.passwords, data/passwoerter/*.hwvault` – exactly where Hostwerk always kept it. Removing the extension deletes nothing.
+`settings.passwords`, `data/passwoerter/*.hwvault` (+ attachments in `*.files/`, backups in `sicherungen/`, website icons in `symbole/`) – exactly where Hostwerk always kept it. Removing the extension deletes nothing.
 
 ## Develop
 

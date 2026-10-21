@@ -30,7 +30,7 @@ jobs:
         if: hashFiles('ui/src/index.jsx') != ''
         run: |
           curl -fsSL https://raw.githubusercontent.com/Passimoritz/hostwerk-public/main/sdk/build-native.js -o "$RUNNER_TEMP/build-native.js"
-          npm i --no-save --no-audit --no-fund esbuild@0.25 lucide-react@1 >/dev/null
+          npm i --no-save --no-audit --no-fund esbuild@0.25 lucide-react@1 jsqr@1.4.0 >/dev/null
           cp ui/index.js "$RUNNER_TEMP/committed.js"
           node "$RUNNER_TEMP/build-native.js" .
           git diff --quiet -- ui/index.js || echo "::warning::ui/index.js differs from a fresh build – run the build before tagging."

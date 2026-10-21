@@ -6,10 +6,10 @@
     "en": "Password manager"
   },
   "description": {
-    "de": "Eigener verschlüsselter Tresor oder Bitwarden/Vaultwarden, 1Password, KeePass, pass und LastPass – mit Browser-Erweiterung, Sicherheitsprüfung (Have I Been Pwned, auch als Kachel), 2FA-Codes, Generator, Teilen mit Mitgliedern, Import aus allen gängigen Diensten, Export als KeePass-Datei und Tresor-Dienst für andere Erweiterungen.",
-    "en": "Own encrypted vault or Bitwarden/Vaultwarden, 1Password, KeePass, pass and LastPass – with browser extension, security check (Have I Been Pwned, also as a tile), 2FA codes, generator, sharing with members, import from every common service, export as a KeePass file and a vault service for other extensions."
+    "de": "Eigener verschlüsselter Tresor (Argon2id) oder Bitwarden/Vaultwarden, 1Password, KeePass, pass und LastPass – Anbieter-Programme lädt Hostwerk beim Verbinden selbst. Mit Browser-Erweiterung, Sicherheitsbericht (Have I Been Pwned, auch als Kachel), 2FA-Codes samt QR-Scan, Passkeys, SSH-Schlüsseln, verschlüsselten Anhängen, Generator mit Regeln je Seite, Teilen mit Mitgliedern, Import aus allen gängigen Diensten (auch .kdbx, .1pux, Bitwarden mit Passwort), verschlüsseltem Export und täglicher Sicherung.",
+    "en": "Own encrypted vault (Argon2id) or Bitwarden/Vaultwarden, 1Password, KeePass, pass and LastPass – Hostwerk loads the provider programs itself when connecting. With browser extension, security report (Have I Been Pwned, also as a tile), 2FA codes with QR scan, passkeys, SSH keys, encrypted attachments, generator with rules per site, sharing with members, import from every common service (also .kdbx, .1pux, Bitwarden with password), encrypted export and daily backups."
   },
-  "version": "1.1.0",
+  "version": "2.0.0",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-passwords",
   "license": "MIT",
