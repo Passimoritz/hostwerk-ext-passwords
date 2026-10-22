@@ -253,6 +253,7 @@ test('Hostwerk 3.0+ (SDK 3.3): Symbole und SSH-Schlüssel über Hostwerks stabil
   const r = await pm.sshInstall(v.id, it.id, 'id_neu');
   assert.deepStrictEqual([r.ok, r.path], [true, '/home/x/.ssh/id_neu']);
   await assert.rejects(pm.sshInstall(v.id, it.id, 'taken'), (e) => e.status === 409 && /already exists/.test(e.message));
-  pm.trace({ kind: 'registry', id: 'browser-chrome', label: 'HKCU\Software\Google\Chrome\Extensions\abc', remove: { key: 'HKCU\Software\Google\Chrome\Extensions\abc' } });
+  const key = ['HKCU', 'Software', 'Google', 'Chrome', 'Extensions', 'abc'].join('\\');
+  pm.trace({ kind: 'registry', id: 'browser-chrome', label: key, remove: { key } });
   assert.ok(calls.some((c) => c[0] === 'trace' && c[1] === 'registry' && c[2] === 'browser-chrome'));
 });
