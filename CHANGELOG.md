@@ -1,3 +1,8 @@
+## 2.2.1
+
+- German texts use Hostwerk’s words (“anmelden”/“Anmeldung” instead of “Login”). / Deutsche Texte mit Hostwerks Wörtern („anmelden“/„Anmeldung“ statt „Login“).
+- Empty password rules show Hostwerk’s empty tile; font sizes and roundings of the browser-extension guide follow the design scale. / Leere Passwort-Regeln zeigen Hostwerks Leer-Kachel; Schriftgrößen und Rundungen der Browser-Erweiterungs-Anleitung folgen der Design-Skala.
+
 ## 2.2.0
 
 - Uses Hostwerk's stable services (SDK 3.3) instead of internals: website icons through `host.icons.favicon` (public addresses only, also after DNS and redirects), SSH keys into `~/.ssh` through `host.sshKeys.import` (never overwrites) – with the permissions `fetch:icons` and `write:ssh-keys`; the own way stays as fallback. Needs Hostwerk 3.0+. / Nutzt Hostwerks stabile Dienste (SDK 3.3) statt Interna: Webseiten-Symbole über `host.icons.favicon` (nur öffentliche Adressen, auch nach DNS und Weiterleitungen), SSH-Schlüssel nach `~/.ssh` über `host.sshKeys.import` (nie überschreiben) – mit den Rechten `fetch:icons` und `write:ssh-keys`; der eigene Weg bleibt als Rückfall. Braucht Hostwerk 3.0+.

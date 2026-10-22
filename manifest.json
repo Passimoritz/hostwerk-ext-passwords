@@ -9,7 +9,7 @@
     "de": "Eigener verschlüsselter Tresor (Argon2id) oder Bitwarden/Vaultwarden, 1Password, KeePass, pass und LastPass – Anbieter-Programme lädt Hostwerk beim Verbinden selbst. Mit Browser-Erweiterung, Sicherheitsbericht (Have I Been Pwned, auch als Kachel), 2FA-Codes samt QR-Scan, Passkeys, SSH-Schlüsseln, verschlüsselten Anhängen, Generator mit Regeln je Seite, Teilen mit Mitgliedern, Import aus allen gängigen Diensten (auch .kdbx, .1pux, Bitwarden mit Passwort), verschlüsseltem Export, täglicher Sicherung und eigenen Bildern je Eintrag.",
     "en": "Own encrypted vault (Argon2id) or Bitwarden/Vaultwarden, 1Password, KeePass, pass and LastPass – Hostwerk loads the provider programs itself when connecting. With browser extension, security report (Have I Been Pwned, also as a tile), 2FA codes with QR scan, passkeys, SSH keys, encrypted attachments, generator with rules per site, sharing with members, import from every common service (also .kdbx, .1pux, Bitwarden with password), encrypted export, daily backups and own images per item."
   },
-  "version": "2.2.0",
+  "version": "2.2.1",
   "author": "Hostwerk",
   "homepage": "https://github.com/Passimoritz/hostwerk-ext-passwords",
   "license": "MIT",

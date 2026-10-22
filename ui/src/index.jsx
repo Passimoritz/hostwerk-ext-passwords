@@ -234,7 +234,7 @@ function GenRules() {
   return (
     <div className="card">
       <div className="card-head"><Wand2 size={16} aria-hidden="true" /><h3>Generator rules</h3><InfoTip>{t('Add a rule in the generator (“Rule for this site”). New passwords for that site and its subdomains then follow it – here and in the browser extension.')}</InfoTip></div>
-      {!rules ? <Loading /> : Object.keys(rules).length === 0 ? <div className="card-body small muted">{t('No rules yet – every site gets 20 characters with all character kinds.')}</div>
+      {!rules ? <Loading /> : Object.keys(rules).length === 0 ? <TileEmpty text={t('No rules yet – every site gets 20 characters with all character kinds.')} />
         : Object.entries(rules).map(([site, o]) => <div key={site} className="list-item"><div className="grow small"><b>{site}</b> <span className="muted tiny">{desc(o)}</span></div><button type="button" className="btn ghost xs icon" title={t('Remove rule')} aria-label={t('Remove the rule for {site}', { site })} onClick={() => drop(site)}><Trash2 /></button></div>)}
     </div>
   );

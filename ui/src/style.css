@@ -118,11 +118,11 @@ pre.pw-row-value, .pw-notes { margin: 0; white-space: pre-wrap; word-break: brea
 }
 
 .pw-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
-.pw-type { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); cursor: pointer; text-align: left; font: inherit; }
-.pw-type span { font-size: 12px; color: var(--muted); }
+.pw-type { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+.pw-type span { font-size: var(--fs-xs); color: var(--muted); }
 .pw-type.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.pw-code { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface-2); border-radius: 10px; }
-.pw-code b { font-size: 28px; letter-spacing: 4px; font-family: ui-monospace, Consolas, monospace; }
+.pw-code { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface-2); border-radius: var(--r-lg); }
+.pw-code b { font-size: var(--fs-3xl); letter-spacing: 4px; font-family: ui-monospace, Consolas, monospace; }
 .pw-type-logo { width: 22px; height: 22px; object-fit: contain; }
 
 /* Passwords: browsers found on this PC */
@@ -132,20 +132,20 @@ pre.pw-row-value, .pw-notes { margin: 0; white-space: pre-wrap; word-break: brea
 .br-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
 .br-opt.have .br-dot { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent); }
 .br-opt.have .br-dot { background: var(--br, var(--accent)); }
-.br-def { font-size: 10px; padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-text); }
+.br-def { font-size: var(--fs-2xs); padding: 0 6px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-text); }
 
 /* ---------- Browser extension: step cards + connected picture (Guide.jsx) ---------- */
 .xg { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
-.xg-step { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); animation: xg-in .35s ease-out both; }
+.xg-step { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); animation: xg-in .35s ease-out both; }
 .xg-step.wait { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); animation: xg-in .35s ease-out both, xg-glow 1.8s ease-in-out infinite .4s; }
 @keyframes xg-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes xg-glow { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 6%, transparent); } }
-.xg-pic { position: relative; height: 54px; display: grid; place-items: center; border-radius: 9px; background: var(--bg-3, var(--bg)); }
+.xg-pic { position: relative; height: 54px; display: grid; place-items: center; border-radius: var(--r-md); background: var(--bg-3, var(--bg)); }
 .xg-art { width: 72px; height: 50px; overflow: visible; }
-.xg-n { position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10.5px; font-weight: 700; background: var(--accent); color: var(--accent-contrast); }
+.xg-n { position: absolute; top: 5px; left: 5px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-2xs); font-weight: 700; background: var(--accent); color: var(--accent-contrast); }
 .xg.done .xg-n { background: var(--ok); }
-.xg-tx { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; line-height: 1.35; }
-.xg-tx span { color: var(--muted); font-size: 11.5px; }
+.xg-tx { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); line-height: 1.35; }
+.xg-tx span { color: var(--muted); font-size: var(--fs-2xs); }
 .xg-frame { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.5; }
 .xg-line { stroke: var(--line-2); stroke-width: 2; stroke-linecap: round; fill: none; }
 .xg-dot { fill: var(--line-2); }
@@ -168,9 +168,9 @@ pre.pw-row-value, .pw-notes { margin: 0; white-space: pre-wrap; word-break: brea
 @keyframes xg-flow { to { stroke-dashoffset: -8; } }
 .xg.done .xg-wire { stroke: var(--ok); stroke-dasharray: none; animation: none; }
 
-.xl { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 8%, var(--bg-2)); animation: xg-in .4s ease-out both; flex-wrap: wrap; }
+.xl { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: var(--r-xl); border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 8%, var(--bg-2)); animation: xg-in .4s ease-out both; flex-wrap: wrap; }
 .xl > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
-.xl > div span { color: var(--muted); font-size: 12px; }
+.xl > div span { color: var(--muted); font-size: var(--fs-xs); }
 .xl-art { width: 200px; max-width: 100%; height: 64px; flex: none; }
 .xl-node { fill: var(--bg); stroke: var(--line-2); stroke-width: 1.8; }
 .xl-hw { stroke: var(--accent); }
@@ -181,12 +181,12 @@ pre.pw-row-value, .pw-notes { margin: 0; white-space: pre-wrap; word-break: brea
 .xl-tick { fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 20; stroke-dashoffset: 20; animation: xl-draw .3s ease-out 1s forwards; }
 @keyframes xl-draw { to { stroke-dashoffset: 0; } }
 @keyframes xl-pop { to { transform: scale(1); } }
-.br-mark { display: inline-grid; place-items: center; flex: none; border-radius: 7px; color: #fff; font-weight: 700; font-size: 11px; }
+.br-mark { display: inline-grid; place-items: center; flex: none; border-radius: var(--r-sm); color: #fff; font-weight: 700; font-size: var(--fs-2xs); }
 .pw-ext-list { display: flex; flex-direction: column; gap: 6px; }
-.pw-ext-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; animation: xg-in .3s ease-out both; }
+.pw-ext-row { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--r-lg); animation: xg-in .3s ease-out both; }
 .pw-ext-row .live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 20%, transparent); }
 @media (prefers-reduced-motion: reduce) { .xg-step, .xg-pop, .xg-toggle, .xg-knob, .xg-lid, .xg-tick, .xg-wire, .xl, .pw-ext-row { animation: none !important; } .xl-wire, .xl-tick { stroke-dashoffset: 0; animation: none !important; } .xl-ok { transform: none; animation: none !important; } }
-.pw-shared-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.pw-shared-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-lg); background: var(--surface-2); }
 
 /* Kachel „Sicherheitsprüfung“ */
 .pw-tile { gap: var(--sp-2); }
