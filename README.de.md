@@ -45,6 +45,8 @@ Erneutes Speichern mit derselben `source` + `key` aktualisiert den Eintrag (das 
 
 ## Installieren
 
+Braucht Hostwerk 3.0 oder neuer. Webseiten-Symbole und das Übergeben von SSH-Schlüsseln nach `~/.ssh` laufen über Hostwerk selbst (Rechte `fetch:icons` und `write:ssh-keys`, SDK 3.3): Hostwerk lädt Symbole nur von öffentlichen Adressen und überschreibt nie einen Schlüssel. Einträge für die Browser-Erweiterung (Registry-Schlüssel für Chrome/Edge, Datei unter Linux) stehen im Erweiterungs-Pop-up unter „Was sie auf deinem PC angelegt hat“ und lassen sich beim Deinstallieren mit entfernen.
+
 In Hostwerk unter **Erweiterungen → Entdecken** auf „Installieren“ klicken. Wer die Funktion schon in Hostwerk 2.8 benutzt hat, bekommt die Erweiterung beim Update automatisch – mit allen Daten.
 
 Native Erweiterungen laufen als Teil von Hostwerk (eigener Server- und Oberflächen-Teil). Darum installiert Hostwerk sie nur aus dem offiziellen Katalog (mit Prüfsumme) oder im Entwickler-Modus.

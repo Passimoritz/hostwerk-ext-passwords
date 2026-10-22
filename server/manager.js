@@ -368,6 +368,16 @@ class PasswordManager {
     const base = path.join(dir, hostName);
     for (const ext of ['png', 'ico', 'svg', 'jpg', 'gif', 'webp']) { const f = `${base}.${ext}`; if (fs.existsSync(f) && Date.now() - fs.statSync(f).mtimeMs < 30 * 864e5) return f; }
     if (fs.existsSync(`${base}.none`) && Date.now() - fs.statSync(`${base}.none`).mtimeMs < 7 * 864e5) return null;
+    // Hostwerk 3.0+ (SDK 3.3): Hostwerk holt das Symbol selbst – nur öffentliche Adressen, auch nach DNS und Weiterleitungen
+    if (host.can('icons.favicon')) {
+      const EXT = { 'image/png': 'png', 'image/x-icon': 'ico', 'image/svg+xml': 'svg', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+      let r = null;
+      try { r = await host.h().icons.favicon(hostName); } catch { r = null; }
+      if (r && r.data && EXT[r.mime] && r.data.length <= 200 * 1024) { const f = `${base}.${EXT[r.mime]}`; fs.writeFileSync(f, r.data); return f; }
+      fs.writeFileSync(`${base}.none`, '');
+      return null;
+    }
+    // Ältere Hostwerk-Versionen: selbst laden (gleiche Regeln)
     // Nur öffentliche Adressen (auch nach Weiterleitungen und DNS) – kein Zugriff aufs Heimnetz über einen Namen
     const isPrivate = (ip) => /^(127\.|10\.|192\.168\.|169\.254\.|0\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) || /^(::1?$|f[cd]|fe80:|::ffff:(127|10|192\.168)\.)/i.test(ip);
     const safeHost = async (h2) => { try { const all = await require('dns').promises.lookup(h2, { all: true }); return all.length > 0 && !all.some((a) => isPrivate(a.address)); } catch { return false; } };
@@ -523,12 +533,19 @@ class PasswordManager {
     if (IS_WIN && keys[browser] && !process.env.HW_TEST) {
       const r = await execFile2('reg.exe', ['add', `HKCU\\${keys[browser]}\\${id}`, '/v', 'update_url', '/t', 'REG_SZ', '/d', update, '/f'], { timeout: 15000 }).catch(() => ({ code: 1 }));
       registered = r.code === 0;
+      if (registered) this.trace({ kind: 'registry', id: `browser-${browser}`, label: `HKCU\\${keys[browser]}\\${id}`, remove: { key: `HKCU\\${keys[browser]}\\${id}` } });
     } else if (!IS_WIN && !process.env.HW_TEST) {
       const dirs = { chrome: '.config/google-chrome', brave: '.config/BraveSoftware/Brave-Browser', vivaldi: '.config/vivaldi', edge: '.config/microsoft-edge' };
-      if (dirs[browser]) { try { const d = path.join(require('os').homedir(), dirs[browser], 'External Extensions'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, `${id}.json`), JSON.stringify({ external_update_url: update })); registered = true; } catch { /* ignore */ } }
+      if (dirs[browser]) { try { const d = path.join(require('os').homedir(), dirs[browser], 'External Extensions'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, `${id}.json`), JSON.stringify({ external_update_url: update })); registered = true; this.trace({ kind: 'file', id: `browser-${browser}`, label: path.join(d, `${id}.json`), remove: { path: path.join(d, `${id}.json`) } }); } catch { /* ignore */ } }
     }
     return { mode: 'store', id, page, registered };
   }
+
+  /**
+   * Spur außerhalb des eigenen Ordners an Hostwerk melden (SDK 3.3): erscheint im Erweiterungs-Pop-up und lässt sich beim
+   * Deinstallieren mit entfernen. Ältere Hostwerk-Versionen: „Hostwerk entfernen“ kennt die Browser-Einträge ohnehin.
+   */
+  trace(t) { if (host.can('traces')) { try { host.h().traces.add(t); } catch { /* ohne Spuren-Liste */ } } }
 
   /** One-time ticket (in memory, 30 min) – for automatic pairing right after "Install" without the folder. */
   pairTicket() { const ticket = crypto.randomBytes(24).toString('hex'); this.pairings.set(ticket, { at: Date.now(), auto: true }); setTimeout(() => this.pairings.delete(ticket), 30 * 60000).unref(); return ticket; }
@@ -803,6 +820,17 @@ class PasswordManager {
     if (!/^[\w.-]{1,60}$/.test(n) || n.endsWith('.pub')) throw Object.assign(new Error(T('Please use a simple file name (letters, digits, . _ -).')), { status: 400 });
     const file = path.join(dir, n);
     if (fs.existsSync(file) || fs.existsSync(file + '.pub')) throw Object.assign(new Error(T('A key “{name}” already exists – please choose another name.', { name: n })), { status: 409 });
+    // Hostwerk 3.0+ (SDK 3.3): Hostwerk legt den Schlüssel selbst ab (nie überschreiben, Rechte 600/644)
+    if (host.can('sshKeys.import')) {
+      let r;
+      try { r = await host.h().sshKeys.import({ name: n, privateKey: it.ssh.privateKey, publicKey: it.ssh.publicKey || '' }); } catch (e) {
+        if (e.status === 409) throw Object.assign(new Error(T('A key “{name}” already exists – please choose another name.', { name: n })), { status: 409 });
+        throw e;
+      }
+      this.record(`${this.get(id).name}: ${it.name}`, T('SSH key handed to Hostwerk ({file})', { file: n }));
+      return { ok: true, name: n, path: r.path };
+    }
+    // Ältere Hostwerk-Versionen: selbst schreiben
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, it.ssh.privateKey.endsWith('\n') ? it.ssh.privateKey : it.ssh.privateKey + '\n', { mode: 0o600, flag: 'wx' });
     if (it.ssh.publicKey) fs.writeFileSync(file + '.pub', it.ssh.publicKey.trim() + '\n', { mode: 0o644, flag: 'wx' });

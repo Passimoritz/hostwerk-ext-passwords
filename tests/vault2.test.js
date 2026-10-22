@@ -225,3 +225,34 @@ test('generator rules per site (also subdomains), clipboard and icon settings', 
   pm.setGenRule('bank.example', null); assert.deepStrictEqual(pm.genRules, {});
   assert.strictEqual(await pm.siteIcon('192.168.1.1'), null, 'no IP addresses'); assert.strictEqual(await pm.siteIcon('nas.local'), null, 'no local names');
 });
+
+test('Hostwerk 3.0+ (SDK 3.3): Symbole und SSH-Schlüssel über Hostwerks stabile Dienste, Browser-Einträge als Spur', async (t) => {
+  const calls = [];
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(20)]);
+  const base = {
+    t: (s, v) => (v ? String(s).replace(/\{(\w+)\}/g, (m, k) => (v[k] !== undefined ? v[k] : m)) : s),
+    lang: () => 'en', lib, broadcast: () => {},
+    core: (n) => ({ secrets: { seal: (x) => `enc:${x}`, open: (x) => String(x || '').replace(/^enc:/, '') } }[n]),
+  };
+  host.bind({
+    ...base,
+    supports: (n) => ['icons.favicon', 'sshKeys.import', 'traces'].includes(n),
+    icons: { favicon: async (h) => { calls.push(['icon', h]); return h === 'github.com' ? { mime: 'image/png', data: png } : null; } },
+    sshKeys: { import: async (d) => { calls.push(['ssh', d.name]); if (d.name === 'taken') throw Object.assign(new Error('exists'), { status: 409 }); return { name: d.name, path: `/home/x/.ssh/${d.name}` }; } },
+    traces: { add: (tr) => { calls.push(['trace', tr.kind, tr.id]); return tr; } },
+  });
+  t.after(() => host.bind(base));
+  const { pm } = manager();
+  const f = await pm.siteIcon('github.com');
+  assert.ok(f && f.endsWith('github.com.png') && fs.readFileSync(f).equals(png), 'Symbol von Hostwerk, eigener Zwischenspeicher bleibt');
+  assert.strictEqual(await pm.siteIcon('nothing.example'), null);
+  assert.strictEqual(await pm.siteIcon('192.168.1.1'), null);
+  assert.deepStrictEqual(calls.filter((c) => c[0] === 'icon').map((c) => c[1]), ['github.com', 'nothing.example'], 'private Adressen fragt sie gar nicht erst');
+  const v = await pm.create({ type: 'hostwerk', name: 'K', password: 'master-pw-123' });
+  const it = await pm.addItem(v.id, { type: 'ssh', name: 'Server', ssh: { privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----\n', publicKey: 'ssh-ed25519 AAAA test' } });
+  const r = await pm.sshInstall(v.id, it.id, 'id_neu');
+  assert.deepStrictEqual([r.ok, r.path], [true, '/home/x/.ssh/id_neu']);
+  await assert.rejects(pm.sshInstall(v.id, it.id, 'taken'), (e) => e.status === 409 && /already exists/.test(e.message));
+  pm.trace({ kind: 'registry', id: 'browser-chrome', label: 'HKCU\Software\Google\Chrome\Extensions\abc', remove: { key: 'HKCU\Software\Google\Chrome\Extensions\abc' } });
+  assert.ok(calls.some((c) => c[0] === 'trace' && c[1] === 'registry' && c[2] === 'browser-chrome'));
+});

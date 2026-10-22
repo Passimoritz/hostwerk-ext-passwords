@@ -45,6 +45,8 @@ Saving the same `source` + `key` again updates the entry (the old password stays
 
 ## Install
 
+Needs Hostwerk 3.0 or newer. Website icons and handing SSH keys to `~/.ssh` go through Hostwerk itself (permissions `fetch:icons` and `write:ssh-keys`, SDK 3.3): Hostwerk only loads icons from public addresses and never overwrites a key. Entries it adds for the browser extension (Chrome/Edge registry key, Linux file) show up in the extension pop-up under “What it set up on your PC” and can be removed when uninstalling.
+
 In Hostwerk: **Extensions → Discover** and click “Install”. If you already used this feature in Hostwerk 2.8, the update installs the extension by itself – with all your data.
 
 Native extensions run as part of Hostwerk (own server and interface part). That is why Hostwerk only installs them from the official catalogue (with checksum) or in developer mode.
