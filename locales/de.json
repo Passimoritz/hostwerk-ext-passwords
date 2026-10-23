@@ -747,5 +747,8 @@
   "Load the folder below in the browser, or pair with a code.": "Lade den Ordner unten im Browser oder kopple mit einem Code.",
   "A pairing code was wrong or expired.": "Ein Kopplungscode war falsch oder abgelaufen.",
   "Show a new pairing code.": "Neuen Kopplungscode anzeigen.",
+  "Locking": "Sperren",
+  "Filling in": "Ausfüllen",
+  "General": "Allgemein",
   "$patterns": []
 }

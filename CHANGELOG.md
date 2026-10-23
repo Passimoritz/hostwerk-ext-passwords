@@ -1,3 +1,7 @@
+## 2.3.0
+
+- Settings with groups on the left (Locking · Filling in · General · Vaults · Provider programs · Generator) and only the chosen group on the right – no 1,100-pixel card any more; newer Hostwerk versions draw the layout themselves (SettingsLayout), older ones get the same as an own navigation / Einstellungen mit Gruppen links (Sperren · Ausfüllen · Allgemein · Tresore · Anbieter-Programme · Generator) und nur der gewählten Gruppe rechts – keine 1 100 Pixel hohe Karte mehr; neuere Hostwerk-Versionen zeichnen das Layout selbst (SettingsLayout), ältere bekommen dasselbe als eigene Navigation
+
 ## 2.2.1
 
 - German texts use Hostwerk’s words (“anmelden”/“Anmeldung” instead of “Login”). / Deutsche Texte mit Hostwerks Wörtern („anmelden“/„Anmeldung“ statt „Login“).

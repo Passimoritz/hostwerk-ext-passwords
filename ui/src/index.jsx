@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
-import { KeyRound, Lock, Unlock, Plus, Star, Trash2, Copy, RefreshCw, ShieldCheck, Upload, Download, Puzzle, Settings2, Link2, EyeOff, Wand2 } from 'lucide-react';
+import { KeyRound, Lock, Unlock, Plus, Star, Trash2, Copy, RefreshCw, ShieldCheck, Upload, Download, Puzzle, Settings2, Link2, EyeOff, Wand2, Terminal } from 'lucide-react';
 import { get, post, put, del, useApi, on, waitJob, fmtDate, HAS_DESKTOP } from '@hostwerk/api';
 import { Btn, Tabs, Field, Switch, SettingRow, Seg, Empty, Loading, Callout, Modal, toast, promptDialog, InfoTip, PathInput, TileEmpty } from '@hostwerk/ui';
+import * as HUI from '@hostwerk/ui';
 import { SvcImage, contextMenu, useNew, FavMark, favSort, favMenuItem } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
 import { VaultView, REQUIRED, fieldLabel, clearLater } from './Vault';
@@ -284,28 +285,71 @@ function PasswordsMain({ id, tab }) {
       ))}
       {!cur && view === 'browser' && !HAS_DESKTOP && <InfoTip pop={false} title="Browser extension">The extension only talks to a Hostwerk on the same machine (127.0.0.1). This server has no screen interface – use Hostwerk on your PC for it, or open Passwords here in the web interface.</InfoTip>}
       {!cur && view === 'browser' && HAS_DESKTOP && <div className="grid split-side"><ExtensionCard data={data} reload={d.reload} /><InfoTip><b>{t('How does Hostwerk install it?')}</b> {t('If the extension is in the browser’s store, Hostwerk tells the browser about it the official way and opens the store page – one click on “Add”. Otherwise the browser loads it as an “unpacked extension” (developer mode). Either way it pairs itself, without a code.')}</InfoTip></div>}
-      {!cur && (view === 'settings' || view === 'einstellungen') && (
-        <div className="grid grid-2">
-          <div className="stack">
-            <div className="card"><div className="card-head"><Settings2 size={16} /><h3>Behaviour</h3></div><div className="card-body stack">
-              <SettingRow title="Lock automatically" text="Lock Hostwerk vaults again after being idle (minutes, 0 = never)."><input className="input sm pw-num" type="number" min={0} max={240} aria-label={t('Minutes')} defaultValue={data.autoLockMin} onBlur={(e) => put('/pw', { autoLockMin: Number(e.target.value) })} /></SettingRow>
-              <SettingRow title="Clear the clipboard" text="Copied passwords and codes are removed from the clipboard again after this many seconds (0 = never)."><input className="input sm pw-num" type="number" min={0} max={600} aria-label={t('Seconds')} defaultValue={data.clipboardSec ?? 30} onBlur={(e) => put('/pw', { clipboardSec: Number(e.target.value) }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Website icons" text="Shows the icon of each website in the list. Hostwerk loads it once from the site itself and keeps it on this PC."><Switch checked={data.icons !== false} onChange={(v) => put('/pw', { icons: v }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Auto sign-in in the browser" text="If exactly one login fits a sign-in page, the extension fills it in and signs you in right away. Off by default."><Switch checked={!!data.autoLogin} onChange={(v) => put('/pw', { autoLogin: v }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Suggestions in the sign-in field" text="When you click into a sign-in field, the extension shows fitting logins right below – one click fills them in."><Switch checked={(data.autofill || {}).inline !== false} onChange={(v) => put('/pw', { autofill: { inline: v } }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Fill in on load" text="If exactly one login fits, it is already in the form when the page opens (without sending it)."><Switch checked={(data.autofill || {}).onLoad === true} onChange={(v) => put('/pw', { autofill: { onLoad: v } }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Suggest strong passwords" text="When you sign up or change a password, the extension suggests a strong password."><Switch checked={(data.autofill || {}).suggest !== false} onChange={(v) => put('/pw', { autofill: { suggest: v } }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Offer to save new logins" text="After a sign-in with an unknown login a 1 appears on the Hostwerk icon – save it in the popup."><Switch checked={(data.autofill || {}).offerSave !== false} onChange={(v) => put('/pw', { autofill: { offerSave: v } }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Leak check (Have I Been Pwned)" text="In the security check only the first 5 characters of the password hash are sent (k-anonymity)."><Switch checked={data.hibp} onChange={(v) => put('/pw', { hibp: v }).then(d.reload)} /></SettingRow>
-              <SettingRow title="Default vault" text="New logins you save in the browser end up here."><select className="select sm" aria-label={t('Default vault')} value={data.defaultId || ''} onChange={(e) => put('/pw', { defaultId: e.target.value }).then(d.reload)}>{data.instances.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></SettingRow>
-            </div></div>
-            <div className="card"><div className="card-head"><Trash2 size={16} /><h3>Manage vaults</h3></div>{data.instances.map((v) => <div key={v.id} className="list-item"><div className="grow small"><b>{v.name}</b> <span className="muted">{v.label}</span></div><Btn className="xs ghost" onClick={() => rename(v)}>Rename</Btn>{v.type === 'hostwerk' ? <Btn className="xs ghost" onClick={() => setCfg(v)}>Master password</Btn> : <Btn className="xs ghost" onClick={() => setCfg(v)}>Access</Btn>}<button className="btn ghost xs icon" title="Remove …" aria-label={t('Remove …')} onClick={() => removeVault(v, d.reload)}><Trash2 /></button></div>)}</div>
-          </div>
-          <div className="stack"><CliCard data={data} reload={d.reload} /><GenRules /><InfoTip><b>{t('No maintenance:')}</b> {t('provider programs are checked every day and updated with a test run, new import formats and services come through the online catalogue.')} <b>{t('The AI helper has no access at all')}</b> {t('to vaults, items or vault files – neither reading nor searching.')}</InfoTip></div>
-        </div>
-      )}
+      {!cur && (view === 'settings' || view === 'einstellungen') && <SettingsView data={data} reload={d.reload} rename={rename} setCfg={setCfg} />}
       {create && <CreateDialog data={data} onClose={() => setCreate(false)} onDone={(r, imp) => { setCreate(false); d.reload(); if (r && r.id) location.hash = `${BASE}/${r.id}${imp ? '/io' : ''}`; }} />}
       {cfg && <CfgDialog v={cfg} data={data} onClose={() => setCfg(null)} onDone={() => { setCfg(null); d.reload(); }} />}
+    </div>
+  );
+}
+
+/** Einstellungs-Gruppen: links die Liste (Pfeiltasten wechseln), rechts genau eine Gruppe – gemerkt je Rechner. */
+const SET_GROUPS = [
+  { id: 'lock', label: 'Locking', icon: Lock },
+  { id: 'fill', label: 'Filling in', icon: Puzzle },
+  { id: 'general', label: 'General', icon: Settings2 },
+  { id: 'vaults', label: 'Vaults', icon: KeyRound },
+  { id: 'providers', label: 'Provider programs', icon: Terminal },
+  { id: 'generator', label: 'Generator', icon: Wand2 },
+];
+function SettingsView({ data, reload, rename, setCfg }) {
+  const [g, setGRaw] = useState(() => { try { return localStorage.getItem('pw:settings') || 'lock'; } catch { return 'lock'; } });
+  const setG = (v) => { setGRaw(v); try { localStorage.setItem('pw:settings', v); } catch { /* egal */ } };
+  const keys = (e) => {
+    const i = SET_GROUPS.findIndex((x) => x.id === g);
+    const n = e.key === 'ArrowDown' ? i + 1 : e.key === 'ArrowUp' ? i - 1 : null;
+    if (n == null || !SET_GROUPS[n]) return;
+    e.preventDefault(); setG(SET_GROUPS[n].id);
+    const el = e.currentTarget.querySelector(`[data-group="${SET_GROUPS[n].id}"]`); if (el) el.focus();
+  };
+  const cur = SET_GROUPS.find((x) => x.id === g) || SET_GROUPS[0];
+  const af = data.autofill || {};
+  const body = (
+      <div className="stack pw-set-body">
+        {cur.id === 'lock' && <div className="card"><div className="card-head"><Lock size={16} /><h3>Locking</h3></div><div className="card-body stack">
+          <SettingRow title="Lock automatically" text="Lock Hostwerk vaults again after being idle (minutes, 0 = never)."><input className="input sm pw-num" type="number" min={0} max={240} aria-label={t('Minutes')} defaultValue={data.autoLockMin} onBlur={(e) => put('/pw', { autoLockMin: Number(e.target.value) })} /></SettingRow>
+          <SettingRow title="Clear the clipboard" text="Copied passwords and codes are removed from the clipboard again after this many seconds (0 = never)."><input className="input sm pw-num" type="number" min={0} max={600} aria-label={t('Seconds')} defaultValue={data.clipboardSec ?? 30} onBlur={(e) => put('/pw', { clipboardSec: Number(e.target.value) }).then(reload)} /></SettingRow>
+        </div></div>}
+        {cur.id === 'fill' && <div className="card"><div className="card-head"><Puzzle size={16} /><h3>Filling in</h3></div><div className="card-body stack">
+          <SettingRow title="Suggestions in the sign-in field" text="When you click into a sign-in field, the extension shows fitting logins right below – one click fills them in."><Switch checked={af.inline !== false} onChange={(v) => put('/pw', { autofill: { inline: v } }).then(reload)} /></SettingRow>
+          <SettingRow title="Fill in on load" text="If exactly one login fits, it is already in the form when the page opens (without sending it)."><Switch checked={af.onLoad === true} onChange={(v) => put('/pw', { autofill: { onLoad: v } }).then(reload)} /></SettingRow>
+          <SettingRow title="Auto sign-in in the browser" text="If exactly one login fits a sign-in page, the extension fills it in and signs you in right away. Off by default."><Switch checked={!!data.autoLogin} onChange={(v) => put('/pw', { autoLogin: v }).then(reload)} /></SettingRow>
+          <SettingRow title="Suggest strong passwords" text="When you sign up or change a password, the extension suggests a strong password."><Switch checked={af.suggest !== false} onChange={(v) => put('/pw', { autofill: { suggest: v } }).then(reload)} /></SettingRow>
+          <SettingRow title="Offer to save new logins" text="After a sign-in with an unknown login a 1 appears on the Hostwerk icon – save it in the popup."><Switch checked={af.offerSave !== false} onChange={(v) => put('/pw', { autofill: { offerSave: v } }).then(reload)} /></SettingRow>
+        </div></div>}
+        {cur.id === 'general' && <div className="card"><div className="card-head"><Settings2 size={16} /><h3>General</h3></div><div className="card-body stack">
+          <SettingRow title="Default vault" text="New logins you save in the browser end up here."><select className="select sm" aria-label={t('Default vault')} value={data.defaultId || ''} onChange={(e) => put('/pw', { defaultId: e.target.value }).then(reload)}>{data.instances.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></SettingRow>
+          <SettingRow title="Website icons" text="Shows the icon of each website in the list. Hostwerk loads it once from the site itself and keeps it on this PC."><Switch checked={data.icons !== false} onChange={(v) => put('/pw', { icons: v }).then(reload)} /></SettingRow>
+          <SettingRow title="Leak check (Have I Been Pwned)" text="In the security check only the first 5 characters of the password hash are sent (k-anonymity)."><Switch checked={data.hibp} onChange={(v) => put('/pw', { hibp: v }).then(reload)} /></SettingRow>
+        </div></div>}
+        {cur.id === 'vaults' && <div className="card"><div className="card-head"><KeyRound size={16} /><h3>Manage vaults</h3><span className="badge">{data.instances.length}</span></div>{data.instances.length ? data.instances.map((v) => <div key={v.id} className="list-item"><div className="grow small"><b>{v.name}</b> <span className="muted">{v.label}</span></div><Btn className="xs ghost" onClick={() => rename(v)}>Rename</Btn>{v.type === 'hostwerk' ? <Btn className="xs ghost" onClick={() => setCfg(v)}>Master password</Btn> : <Btn className="xs ghost" onClick={() => setCfg(v)}>Access</Btn>}<button type="button" className="btn ghost xs icon" title={t('Remove …')} aria-label={t('Remove …')} onClick={() => removeVault(v, reload)}><Trash2 /></button></div>) : <TileEmpty icon={KeyRound} text={t('No vault yet')} />}</div>}
+        {cur.id === 'providers' && <><CliCard data={data} reload={reload} /><InfoTip><b>{t('No maintenance:')}</b> {t('provider programs are checked every day and updated with a test run, new import formats and services come through the online catalogue.')} <b>{t('The AI helper has no access at all')}</b> {t('to vaults, items or vault files – neither reading nor searching.')}</InfoTip></>}
+        {cur.id === 'generator' && <GenRules />}
+      </div>
+  );
+  // Neuere Hostwerk-Versionen bringen das Einstellungs-Layout mit linker Navigation selbst mit – dann dieses, sonst das eigene
+  if (HUI.SettingsLayout) {
+    return <HUI.SettingsLayout groups={SET_GROUPS.map((x) => ({ id: x.id, label: t(x.label), icon: x.icon }))} value={cur.id} onChange={setG} label={t('Settings')}>{body}</HUI.SettingsLayout>;
+  }
+  return (
+    <div className="pw-set">
+      <nav className="card pw-set-nav" aria-label={t('Settings')}>
+        <ul onKeyDown={keys}>
+          {SET_GROUPS.map((x) => (
+            <li key={x.id}><button type="button" data-group={x.id} className={`pw-set-item ${x.id === cur.id ? 'on' : ''}`} aria-current={x.id === cur.id ? 'true' : undefined} tabIndex={x.id === cur.id ? 0 : -1} onClick={() => setG(x.id)}><x.icon size={15} aria-hidden="true" />{t(x.label)}</button></li>
+          ))}
+        </ul>
+      </nav>
+      {body}
     </div>
   );
 }

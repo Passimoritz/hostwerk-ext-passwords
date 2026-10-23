@@ -96,6 +96,21 @@ pre.pw-row-value, .pw-notes { margin: 0; white-space: pre-wrap; word-break: brea
 .pw-gen { padding: var(--sp-2) var(--sp-3); border: 0; background: var(--surface-2); border-radius: var(--r-md); color: var(--text); text-align: left; cursor: pointer; word-break: break-all; font-size: var(--fs-md); min-height: 40px; }
 .pw-gen-inline { margin-top: var(--sp-2); }
 .pw-num { width: 84px; }
+/* Einstellungen: links die Gruppen, rechts eine Gruppe (unter 860 px untereinander, Gruppen als Zeile) */
+.pw-set { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+.pw-set-nav { position: sticky; top: var(--sp-3); }
+.pw-set-nav ul { list-style: none; margin: 0; padding: var(--sp-1); display: flex; flex-direction: column; gap: 2px; }
+.pw-set-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 36px; padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--r-md); background: none; color: var(--text-2); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.pw-set-item:hover { background: var(--surface-2); color: var(--text); }
+.pw-set-item.on { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.pw-set-item:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: -2px; }
+.pw-set-body { min-width: 0; }
+@media (max-width: 860px) {
+  .pw-set { grid-template-columns: 1fr; }
+  .pw-set-nav { position: static; }
+  .pw-set-nav ul { flex-direction: row; flex-wrap: wrap; }
+  .pw-set-item { width: auto; }
+}
 .pw-gap-1 { gap: var(--sp-1); }
 .pw-field-row { margin-top: var(--sp-1); }
 .pw-add-field { margin-top: var(--sp-1); }
