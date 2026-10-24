@@ -45,6 +45,7 @@
     "docs/screenshot.png",
     "docs/screenshot.de.png"
   ],
+  "videos": "videos/index.json",
   "provides": [
     "pw",
     "passwordVault"

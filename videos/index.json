@@ -1,0 +1,32 @@
+[
+  {
+    "id": "passwoerter",
+    "lang": "de",
+    "title": "Passwörter – der Rundgang",
+    "seconds": 36
+  },
+  {
+    "id": "passwoerter-stimme",
+    "lang": "de",
+    "title": "Passwörter – der Rundgang",
+    "seconds": 36,
+    "voice": true,
+    "of": "passwoerter",
+    "section": "stimme"
+  },
+  {
+    "id": "passwoerter-en",
+    "lang": "en",
+    "title": "Passwords – the full tour",
+    "seconds": 33
+  },
+  {
+    "id": "passwoerter-stimme-en",
+    "lang": "en",
+    "title": "Passwords – the full tour",
+    "seconds": 33,
+    "voice": true,
+    "of": "passwoerter-en",
+    "section": "stimme"
+  }
+]
