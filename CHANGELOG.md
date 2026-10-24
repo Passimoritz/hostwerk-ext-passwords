@@ -1,3 +1,7 @@
+## 2.3.1
+
+- New animated icon and banner in the common Hostwerk style (isometric block). / Neues animiertes Symbol und Banner im gemeinsamen Hostwerk-Stil (isometrischer Block).
+
 ## 2.3.0
 
 - Settings with groups on the left (Locking · Filling in · General · Vaults · Provider programs · Generator) and only the chosen group on the right – no 1,100-pixel card any more; newer Hostwerk versions draw the layout themselves (SettingsLayout), older ones get the same as an own navigation / Einstellungen mit Gruppen links (Sperren · Ausfüllen · Allgemein · Tresore · Anbieter-Programme · Generator) und nur der gewählten Gruppe rechts – keine 1 100 Pixel hohe Karte mehr; neuere Hostwerk-Versionen zeichnen das Layout selbst (SettingsLayout), ältere bekommen dasselbe als eigene Navigation
