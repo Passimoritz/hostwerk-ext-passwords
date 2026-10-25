@@ -84,7 +84,7 @@ test('program missing: setting up Bitwarden loads it, connecting says what to do
   await assert.rejects(pm.unlock(op.id), (e) => e.pwCode === 'PW_CLI_INSTALLING');
 });
 
-test('install: only from the maker, checksum handed to the download, signature checked', async () => {
+test('install: only from the maker, checksum handed to the download, signature checked', { skip: !hasCore && 'Hostwerk core (keeper) not found' }, async () => {
   const { pm } = manager();
   await pm.create({ type: 'bitwarden', name: 'BW', cfg: { email: 'a@b.example' } }).catch(() => {});
   fakeRelease.version = '2026.10.0'; fakeRelease.url = null;
@@ -127,7 +127,7 @@ test('outdated: update with test run, a broken version is rolled back and skippe
   assert.ok(notes['pw-cli-bw-check'].ok);
 });
 
-test('blocked by Smart App Control: recognised and explained, last version stays', async () => {
+test('blocked by Smart App Control: recognised and explained, last version stays', { skip: !hasCore && 'Hostwerk core (keeper) not found' }, async () => {
   const { pm } = manager();
   await pm.create({ type: 'bitwarden', name: 'BW', cfg: { email: 'a@b.example' } });
   fakeRelease.version = '2026.10.0';
