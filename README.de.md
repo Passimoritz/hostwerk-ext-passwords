@@ -4,7 +4,7 @@
 
 Eigener verschlüsselter Tresor auf diesem PC oder die Anbindung an den Passwort-Manager, den du schon nutzt – Bitwarden/Vaultwarden, 1Password, KeePass, pass oder LastPass. Alles andere (Google, Apple, Proton, Dashlane …) kommt per Import.
 
-[English](README.md) · Offizielle [Hostwerk](https://github.com/Passimoritz/hostwerk-public)-Erweiterung (SDK 2.7, native Erweiterung)
+[English](README.md) · Offizielle [Hostwerk](https://github.com/Passimoritz/hostwerk-public)-Erweiterung (native Erweiterung, ab Hostwerk 3.0)
 
 ![Bildschirmfoto](docs/screenshot.de.png)
 

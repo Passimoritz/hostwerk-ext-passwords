@@ -4,7 +4,7 @@
 
 Own encrypted vault on this PC or a connection to the password manager you already use – Bitwarden/Vaultwarden, 1Password, KeePass, pass or LastPass. Everything else (Google, Apple, Proton, Dashlane …) comes in by import.
 
-[Deutsch](README.de.md) · An official [Hostwerk](https://github.com/Passimoritz/hostwerk-public) extension (SDK 2.7, native extension)
+[Deutsch](README.de.md) · An official [Hostwerk](https://github.com/Passimoritz/hostwerk-public) extension (native extension, Hostwerk 3.0 or newer)
 
 ![Screenshot](docs/screenshot.png)
 
