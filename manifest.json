@@ -36,8 +36,11 @@
     "icon": "key",
     "nav": {
       "group": "system",
-      "after": "live"
-    }
+      "after": "live",
+      "area": "passwoerter",
+      "order": 15
+    },
+    "route": "passwoerter"
   },
   "backend": "server/index.js",
   "ui": "ui/index.js",
@@ -70,5 +73,13 @@
     "*": [
       "tabs"
     ]
-  }
+  },
+  "data": {
+    "settings": [
+      "passwords"
+    ]
+  },
+  "liveEvents": [
+    "passwords"
+  ]
 }

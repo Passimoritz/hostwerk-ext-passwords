@@ -5,6 +5,7 @@ import { Btn, Tabs, Field, Switch, SettingRow, Seg, Empty, Loading, Callout, Mod
 import * as HUI from '@hostwerk/ui';
 import { SvcImage, contextMenu, useNew, FavMark, favSort, favMenuItem } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
+import { openNew } from '@hostwerk/kit';
 import { VaultView, REQUIRED, fieldLabel, clearLater } from './Vault';
 import { SharedWithMe } from './Share';
 import { ExtGuide, ExtLinked, extSteps, BrowserMark, BROWSER_COLORS } from './Guide';
@@ -410,5 +411,10 @@ export default {
   pages: { main: PasswordsPage },
   slots: {
     'dashboard.tiles': [{ id: 'security', title: 'Password check', icon: ShieldCheck, size: 'third', Component: SecurityTile }],
+    // Hostwerks Menü „Neu“: im passenden Abschnitt, ausgeblendet mit dem Bereich „passwoerter“
+    'new.items': [
+      { id: 'vault', section: 'dienste', area: 'passwoerter', title: 'Password vault', hint: 'Own vault or Bitwarden, 1Password, KeePass', icon: KeyRound, color: '#7c5cff', keys: 'passwort tresor bitwarden keepass 1password', onClick: () => openNew('pw', '/passwoerter') },
+      { id: 'browser', section: 'verbinden', area: 'passwoerter', title: 'Browser extension', hint: 'Fill in passwords in the browser', icon: Puzzle, color: '#7c5cff', keys: 'browser erweiterung chrome firefox', href: '/passwoerter/_/browser' },
+    ],
   },
 };

@@ -13,6 +13,11 @@ exports.activate = (h) => {
   // Tresor als Dienst: andere Erweiterungen legen Zugänge mit host.use('passwordVault') ab
   h.provide('passwordVault', pw.vaultService());
   pw.routes(h.router);
+  // Selbstwartung, Logos und Änderungsprotokoll (SDK 3.5) – ältere Hostwerk-Versionen ohne contribute kannten das selbst
+  if (typeof h.aiExtend === 'function') h.aiExtend(require('./ai').passwordsAi(pw)); // KI: nur Passwort erzeugen (SDK 3.5)
+  if (typeof h.contribute === 'function') h.contribute('advisor', { kind: 'pw', label: 'Passwort-Tresor', start: /passw|tresor|bitwarden|keepass|1password|zugangsdaten/i, open: { id: 'pw', route: '/passwoerter' } }); // Berater
+  if (typeof h.contribute === 'function') h.contribute('clickguard', { block: [/^\/pw\/(extension|browser)/] }); // Klick-Test: Browser-Einträge
+  if (typeof h.contribute === 'function') { const c = require('./contrib').contributions(pw); for (const [type, def] of Object.entries(c)) { try { h.contribute(type, def); } catch (e) { if (h.log) h.log('contribute', e.message); } } }
   pw.extRoutes(h.publicRouter);
   // Verschlüsselte Stände der Hostwerk-Tresore in der Sicherungs-Zentrale (SDK 2.10) – ältere Hostwerk-Versionen ohne sie
   if (h.backups && h.backups.register && h.ctx.backupCenter) { try { h.backups.register(pw.backupSource()); } catch (e) { if (h.log) h.log('backups', e.message); } }
