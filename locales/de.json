@@ -162,7 +162,7 @@
   "Shared with me": "Mit mir geteilt",
   "Members see the login in their view “Shared with me” – only while your vault is unlocked. Every access is in the change log.": "Mitglieder sehen den Zugang in ihrer Ansicht „Mit mir geteilt“ – nur solange dein Tresor entsperrt ist. Jeder Zugriff steht im Änderungs-Protokoll.",
   "No members yet": "Noch keine Mitglieder",
-  "Members come with the “Team & users” extension (Go live → Users). Then you can share single logins with them here.": "Mitglieder kommen mit der Erweiterung „Team & Benutzer“ (Livebetrieb → Benutzer). Danach kannst du hier einzelne Zugänge mit ihnen teilen.",
+  "Members come with the “Team & users” extension (Go live → Access → Users). Then you can share single logins with them here.": "Mitglieder kommen mit der Erweiterung „Team & Benutzer“ (Livebetrieb → Zugriff → Benutzer). Danach kannst du hier einzelne Zugänge mit ihnen teilen.",
   "Search …": "Suchen …",
   "Nothing shared yet": "Noch nichts geteilt",
   "When someone shares a login with you, it shows up here.": "Wenn jemand einen Zugang mit dir teilt, erscheint er hier.",

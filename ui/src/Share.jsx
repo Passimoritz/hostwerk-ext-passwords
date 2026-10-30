@@ -21,7 +21,7 @@ export function ShareDialog({ vault, item, name, onClose }) {
     <Modal title={t('Share “{name}”', { name })} subtitle="Members see the login in their view “Shared with me” – only while your vault is unlocked. Every access is in the change log." onClose={onClose}
       footer={<><Btn onClick={onClose}>Cancel</Btn><Btn className="primary" disabled={!users} onClick={save}>Save</Btn></>}>
       {!d.data || !users ? <Loading /> : d.data.members.length === 0
-        ? <Empty icon={Users} title="No members yet" text="Members come with the “Team & users” extension (Go live → Users). Then you can share single logins with them here." />
+        ? <Empty icon={Users} title="No members yet" text="Members come with the “Team & users” extension (Go live → Access → Users). Then you can share single logins with them here." />
         : <div className="stack" style={{ gap: 8 }}>{d.data.members.map((m) => (
           <div key={m.id} className="row-tight"><Users size={14} className="muted" /><b className="grow">{m.name}</b>
             <Seg value={users[m.id] || 'none'} onChange={(v) => setUsers((u) => { const n = { ...u }; if (v === 'none') delete n[m.id]; else n[m.id] = v; return n; })} options={[{ id: 'none', label: t('Not') }, { id: 'copy', label: t('Copy only') }, { id: 'read', label: t('View & copy') }]} />
