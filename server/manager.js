@@ -19,7 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { VaultStore, TYPES, hostOf } = require('./store');
+const { VaultStore, TYPES, hostOf, siteMatch } = require('./store');
 const { PROVIDERS, NO_ICONS, IS_WIN } = require('./providers');
 const { imageMime, MAX_ICON } = require('./store');
 const { Clis } = require('./clis');
@@ -37,6 +37,14 @@ const KIND = () => T('Passwords'); // category in Hostwerk's change log
 const secrets = { open: (x) => host.core('secrets').open(x), seal: (x) => host.core('secrets').seal(x) };
 const broadcast = (m) => host.broadcast(m);
 const execFile2 = (...a) => host.core('util').exec(...a);
+/** Pause before the next try after n wrong master passwords: 0.5 s each, at most 5 s. */
+const brakeMs = (n) => Math.min(5000, Math.max(0, n) * 500);
+/** Every this many wrong tries in a row get an entry in the change log. */
+const FAILS_LOGGED = 5;
+/** Sleep detection: a tick every 15 s; a gap of more than 2 minutes means the PC (and Hostwerk with it) slept. */
+const SLEEP_TICK = 15000;
+const sleptBetween = (last, now, tick = SLEEP_TICK) => now - last > Math.max(120000, tick * 8);
+const sameText = (a, b) => { const x = crypto.createHash('sha256').update(String(a)).digest(); const y = crypto.createHash('sha256').update(String(b)).digest(); return crypto.timingSafeEqual(x, y); };
 
 /** Source folder of the browser extension: inside this package, otherwise Hostwerk's own copy. */
 function extSource() {
@@ -73,7 +81,22 @@ class PasswordManager {
     // Verschlüsselte Sicherung der Hostwerk-Tresore: täglich, nur wenn sich die Datei geändert hat (14 Stände je Tresor)
     if (!process.env.HW_TEST) this.timers.push(setInterval(() => { try { this.backupAll(); } catch { /* nächster Tag */ } }, 6 * 3600e3));
     if (!process.env.HW_TEST) this.timers.push(setInterval(() => this.loadCatalog({ online: true }).catch(() => {}), 24 * 3600000));
+    // Ruhezustand: der PC schläft, Hostwerk mit – beim Aufwachen springt die Uhr. Dann alle Tresore sperren (wie bei
+    // Passwort-Managern üblich). Nur Hostwerks eigene Zeitmessung, keine Systemeinstellung.
+    this.lastTick = Date.now();
+    if (!process.env.HW_TEST) this.timers.push(setInterval(() => this.checkSleep(), SLEEP_TICK));
     for (const t of this.timers) if (t.unref) t.unref();
+  }
+  /** Called every SLEEP_TICK: after a jump (the PC slept) lock every open vault, if the setting is on. */
+  checkSleep(now = Date.now()) {
+    const slept = sleptBetween(this.lastTick, now);
+    this.lastTick = now;
+    if (!slept || this.cfg.lockOnSleep === false) return false;
+    const open = this.list().filter((i) => { const s = this.stores.get(i.id); return s && !s.locked(); });
+    if (!open.length) return false;
+    this.lockAll();
+    for (const i of open) this.record(i.name, T('Locked after sleep'));
+    return true;
   }
   /** Password generator and rating for Hostwerk (e.g. the AI tool pw_generate) – never touches a vault. */
   generate(opts = {}) { return pwc.generate(opts); }
@@ -102,7 +125,7 @@ class PasswordManager {
   info(i) {
     const s = this.stores.get(i.id);
     const prov = PROVIDERS[i.type];
-    return { id: i.id, name: i.name, type: i.type, label: i.type === 'hostwerk' ? T('Hostwerk vault') : (prov && prov.label) || i.type, native: i.type === 'hostwerk' || !!(prov && prov.native), readonly: !!(prov && prov.readonly), cli: (prov && prov.cli) || null, locked: !s || s.locked(), exists: i.type === 'hostwerk' ? fs.existsSync(this.file(i.id)) : true, cfg: this.pubCfg(i), createdAt: i.createdAt, audit: this.audits.get(i.id) || null, default: this.cfg.defaultId === i.id, color: i.color || null };
+    return { exportAuth: this.reauthKind(i), id: i.id, name: i.name, type: i.type, label: i.type === 'hostwerk' ? T('Hostwerk vault') : (prov && prov.label) || i.type, native: i.type === 'hostwerk' || !!(prov && prov.native), readonly: !!(prov && prov.readonly), cli: (prov && prov.cli) || null, locked: !s || s.locked(), exists: i.type === 'hostwerk' ? fs.existsSync(this.file(i.id)) : true, cfg: this.pubCfg(i), createdAt: i.createdAt, audit: this.audits.get(i.id) || null, default: this.cfg.defaultId === i.id, color: i.color || null };
   }
   pubCfg(i) { const out = {}; for (const [k, v] of Object.entries(i.cfg || {})) out[k] = typeof v === 'string' && v.startsWith('enc:') ? '••••' : v; return out; }
   file(id) { return path.join(this.dir, `${id}.hwvault`); }
@@ -120,13 +143,26 @@ class PasswordManager {
     const type = b.type === 'hostwerk' || PROVIDERS[b.type] ? b.type : null;
     if (!type) throw new Error(T('Unknown kind of vault'));
     if (PROVIDERS[type] && PROVIDERS[type].linux && IS_WIN) throw new Error(T('{label} only exists on Linux/macOS.', { label: PROVIDERS[type].label }));
+    // KeePass ohne Datei ließe sich anlegen, aber nie öffnen – gleich sagen, was fehlt
+    if (type === 'keepass' && !String((b.cfg || {}).file || '').trim()) throw Object.assign(new Error(T('No .kdbx file set – enter the path to the file under “Access”.')), { status: 400 });
     const id = `${type}-${crypto.randomBytes(3).toString('hex')}`;
-    const inst = { id, name: String(b.name || (type === 'hostwerk' ? T('My vault') : PROVIDERS[type].label)).slice(0, 60), type, cfg: {}, createdAt: Date.now(), color: b.color || null };
+    const inst = { id, name: (String(b.name || '').trim() || (type === 'hostwerk' ? T('My vault') : PROVIDERS[type].label)).slice(0, 60), type, cfg: {}, createdAt: Date.now(), color: b.color || null };
+    // Master-Passwort vor dem Eintragen prüfen – sonst bliebe ein Tresor ohne Datei zurück, der sich nie entsperren lässt
+    if (type === 'hostwerk') {
+      if (!b.password) throw new Error(T('The master password is missing.'));
+      if (String(b.password).length < 8) throw new Error(T('The master password needs at least 8 characters.'));
+    }
     this.applyCfg(inst, b.cfg || {});
     this.list().push(inst);
+    const wasDefault = this.cfg.defaultId;
     if (!this.cfg.defaultId) this.cfg.defaultId = id;
     this.save();
-    if (type === 'hostwerk') { if (!b.password) throw new Error(T('The master password is missing.')); await this.store(id).create(b.password); }
+    if (type === 'hostwerk') {
+      try { await this.store(id).create(b.password); } catch (e) {
+        this.stores.delete(id); this.cfg.instances = this.list().filter((x) => x.id !== id); this.cfg.defaultId = wasDefault; this.save();
+        throw e;
+      }
+    }
     broadcast({ type: 'passwords' });
     const out = this.info(inst);
     // Anbieter mit eigenem Programm: gleich beim Einrichten laden (Fortschritt als Auftrag) – bis zum Verbinden ist es da
@@ -143,7 +179,7 @@ class PasswordManager {
       if (kind === 'password') { if (v && v !== '••••') inst.cfg[k] = secrets.seal(v); if (v === '') delete inst.cfg[k]; } else inst.cfg[k] = v.slice(0, 500);
     }
   }
-  update(id, b) { const i = this.get(id); if (typeof b.name === 'string') i.name = b.name.slice(0, 60); if (b.cfg) { this.applyCfg(i, b.cfg); const s = this.stores.get(id); if (s && s.lock) s.lock(); } if (b.color !== undefined) i.color = b.color || null; if (b.default) this.cfg.defaultId = id; this.save(); broadcast({ type: 'passwords' }); return this.info(i); }
+  update(id, b) { const i = this.get(id); if (typeof b.name === 'string' && b.name.trim()) i.name = b.name.trim().slice(0, 60); if (b.cfg) { this.applyCfg(i, b.cfg); const s = this.stores.get(id); if (s && s.lock) s.lock(); } if (b.color !== undefined) i.color = b.color || null; if (b.default) this.cfg.defaultId = id; this.save(); broadcast({ type: 'passwords' }); return this.info(i); }
   /**
    * Remove a vault – only with a password: Hostwerk vault = master password; provider with a stored password = that
    * password; otherwise the name as confirmation. Wrong entries are logged.
@@ -162,7 +198,28 @@ class PasswordManager {
   /** Nach einem neuen Anbieter-Programm: offene Verbindungen dieser Anbieter schließen (nächster Zugriff verbindet neu). */
   relock(types) { for (const i of this.list()) if (types.includes(i.type)) { const s = this.stores.get(i.id); if (s && s.lock) s.lock(); } broadcast({ type: 'passwords' }); }
 
-  async unlock(id, password) { const i = this.get(id); const s = this.store(id); const r = i.type === 'hostwerk' ? await s.unlock(password) : await s.connect({ password }); broadcast({ type: 'passwords' }); return { ok: true, ...(r || {}) }; }
+  async unlock(id, password) {
+    const i = this.get(id); const s = this.store(id);
+    // Durchprobieren bremsen: Versuche je Tresor nacheinander (sonst liefen viele Argon2id-Berechnungen à 64 MiB parallel),
+    // nach falschen Master-Passwörtern mit wachsender Pause (0,5 s je Fehlversuch, höchstens 5 s)
+    if (!this.unlockQ) { this.unlockQ = new Map(); this.unlockFails = new Map(); }
+    const run = (this.unlockQ.get(id) || Promise.resolve()).catch(() => {}).then(async () => {
+      const f = this.unlockFails.get(id) || 0;
+      if (f > 0) await new Promise((ok) => setTimeout(ok, brakeMs(f)));
+      try { const r = i.type === 'hostwerk' ? await s.unlock(password) : await s.connect({ password }); this.unlockFails.delete(id); return r; } catch (e) {
+        if (e && e.status === 401) {
+          const n = f + 1; this.unlockFails.set(id, n);
+          // Sichtbar machen: wie oft falsch, wie lange der nächste Versuch wartet – und ab 5 Fehlversuchen ins Protokoll
+          e.message = `${e.message} ${T('Wrong tries in a row: {n} – the next try waits {s} s.', { n, s: N(brakeMs(n) / 1000) })}`;
+          if (n % FAILS_LOGGED === 0) this.record(i.name, T('{n} wrong master passwords in a row', { n }));
+        }
+        throw e;
+      }
+    });
+    this.unlockQ.set(id, run);
+    const r = await run;
+    broadcast({ type: 'passwords' }); return { ok: true, ...(r || {}) };
+  }
   lock(id) { const s = this.stores.get(id); if (s) s.lock(); broadcast({ type: 'passwords' }); }
   lockAll() { for (const s of this.stores.values()) s.lock(); broadcast({ type: 'passwords' }); }
 
@@ -294,8 +351,35 @@ class PasswordManager {
    * Export. Encrypted: "kdbx" (KeePass, own password) and "bitwarden-encrypted" (Bitwarden JSON with password).
    * Unencrypted (bitwarden-json, *-csv) only with plain: true – the interface asks with a clear warning first.
    */
-  async exportFile(id, { kind = 'bitwarden-json', password = '', plain = false } = {}) {
+  /**
+   * Confirm it is really the owner (before an export): Hostwerk vault = master password, provider with a stored password =
+   * that password, otherwise the vault name typed out (as when removing). Wrong entries are slowed down like unlocking.
+   */
+  async reauth(id, { master = '', confirm = '' } = {}) {
     const i = this.get(id);
+    if (!this.reauthFails) this.reauthFails = new Map();
+    const f = this.reauthFails.get(id) || 0;
+    if (f > 0) await new Promise((ok) => setTimeout(ok, brakeMs(f)));
+    let ok;
+    if (i.type === 'hostwerk') ok = !!master && (await this.store(id).verify(String(master)));
+    else {
+      const stored = i.cfg && i.cfg.password ? secrets.open(i.cfg.password) : '';
+      ok = stored ? sameText(String(master || ''), stored) : String(confirm).trim().replace(/\s+/g, ' ').toLowerCase() === String(i.name).trim().replace(/\s+/g, ' ').toLowerCase();
+    }
+    if (ok) { this.reauthFails.delete(id); return true; }
+    this.reauthFails.set(id, f + 1);
+    const byName = this.reauthKind(i) === 'name';
+    this.record(i.name, T(byName ? 'Export refused (wrong name)' : 'Export refused (wrong master password)'));
+    throw Object.assign(new Error(T(byName ? 'The name does not match – nothing was exported.' : 'Wrong master password – nothing was exported.')), { status: 401 });
+  }
+  /** What the export dialog has to ask for: 'master' (password) or 'name' (type the vault name). */
+  reauthKind(i) { return i.type === 'hostwerk' || (i.cfg && i.cfg.password) ? 'master' : 'name'; }
+
+  async exportFile(id, { kind = 'bitwarden-json', password = '', plain = false, master = '', confirm = '' } = {}) {
+    const i = this.get(id);
+    // Jeder Export enthält alle Passwörter – auch der verschlüsselte, dessen Passwort wählt ja der Exportierende. Darum
+    // erst nach erneuter Eingabe des Master-Passworts (schützt, wenn Hostwerk offen gelassen wurde).
+    await this.reauth(id, { master, confirm });
     const items = (await this.allWithSecrets(id)).filter((x) => !x.trashed);
     const enc = kind === 'kdbx' || kind === 'bitwarden-encrypted';
     if (enc && (typeof password !== 'string' || password.length < 8)) throw Object.assign(new Error(T('The password for the export file needs at least 8 characters.')), { status: 400 });
@@ -308,8 +392,8 @@ class PasswordManager {
     return { data: Buffer.from(formats.exportCsv(items, kind.replace('-csv', ''))), name: `${i.name}-${kind}.csv`, mime: 'text/csv' };
   }
   /** Compatibility (1.x): text export / KeePass file. */
-  async exportText(id, kind = 'bitwarden-json') { const r = await this.exportFile(id, { kind, plain: true }); return { text: r.data.toString('utf8'), name: r.name, mime: r.mime }; }
-  exportKdbx(id, password) { return this.exportFile(id, { kind: 'kdbx', password }); }
+  async exportText(id, kind = 'bitwarden-json', auth = {}) { const r = await this.exportFile(id, { kind, plain: true, ...auth }); return { text: r.data.toString('utf8'), name: r.name, mime: r.mime }; }
+  exportKdbx(id, password, auth = {}) { return this.exportFile(id, { kind: 'kdbx', password, ...auth }); }
 
   /* ---------- encrypted backups (backup centre) ---------- */
   backupDir(id) { return path.join(this.dir, 'sicherungen', id); }
@@ -470,6 +554,7 @@ class PasswordManager {
 
   /** Copy items between vaults (e.g. Bitwarden → Hostwerk vault). */
   async transfer(from, to, { ids = null } = {}) {
+    if (from === to) throw Object.assign(new Error(T('Choose another vault as the target.')), { status: 400 });
     const items = (await this.allWithSecrets(from)).filter((x) => !ids || ids.includes(x.id));
     const s = this.store(to); const t = this.get(to);
     let n = 0;
@@ -607,8 +692,10 @@ class PasswordManager {
    * Set a share. until = { memberId: point in time (ms) } – without an entry the share has no end. Hostwerk ends expired
    * shares itself (on the next access and hourly) and notes that in the change log.
    */
-  setShare(vault, item, users, until = {}) {
+  async setShare(vault, item, users, until = {}) {
     this.get(vault);
+    // Nur echte Einträge freigeben (Entfernen einer Freigabe geht immer – auch wenn der Eintrag schon weg ist)
+    if (Object.keys(users || {}).length) await this.store(vault).get(item);
     const known = new Set(this.members().filter((u) => u.role !== 'admin').map((u) => u.id));
     const clean = {}; const ends = {};
     for (const [uid, mode] of Object.entries(users || {})) {
@@ -856,8 +943,8 @@ class PasswordManager {
     r.get('/pw/:id/items/:item/share', J(async (req) => ({ users: this.getShare(req.params.id, req.params.item), until: this.getShareUntil(req.params.id, req.params.item), members: this.members().filter((u) => u.role !== 'admin' && u.enabled !== false).map((u) => ({ id: u.id, name: u.name })) })));
     r.put('/pw/:id/items/:item/share', J(async (req) => this.setShare(req.params.id, req.params.item, (req.body || {}).users, (req.body || {}).until)));
     r.get('/pw/browsers', J(async () => host.core('browsers').detectBrowsers()));
-    r.get('/pw', J(async () => ({ autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), instances: this.list().map((i) => this.info(i)), providers: Object.entries(PROVIDERS).filter(([, p]) => !(p.linux && IS_WIN)).map(([id, p]) => ({ id, label: p.label, fields: p.fields, hint: p.hint, cli: p.cli || null, readonly: !!p.readonly, icons: this.iconSupport(id).ok, iconsWhy: this.iconSupport(id).why })), catalog: this.catalog, formats: formats.allFormats().map((f) => ({ id: f.id, label: f.label })), ext: this.cfg.ext.map(({ hash, ...e }) => e), autoLockMin: this.cfg.autoLockMin ?? 15, hibp: this.cfg.audit.hibp !== false, defaultId: this.cfg.defaultId || null, types: TYPES, members: this.members().length > 0, cli: { bw: this.clis.quick('bw'), op: this.clis.quick('op') }, clipboardSec: this.cfg.clipboardSec ?? 30, icons: this.cfg.icons !== false, sshDir: (this.ctx.sshKeys && this.ctx.sshKeys.dir) || null }))); // eslint-disable-line no-unused-vars
-    r.put('/pw', (req, res) => { const b = req.body || {}; if (Number.isFinite(Number(b.autoLockMin))) { this.cfg.autoLockMin = Math.max(0, Math.min(240, Number(b.autoLockMin))); for (const s of this.stores.values()) if (s.autoLockMin !== undefined) s.autoLockMin = this.cfg.autoLockMin; } if (Number.isFinite(Number(b.clipboardSec))) this.cfg.clipboardSec = Math.max(0, Math.min(600, Number(b.clipboardSec))); if (typeof b.icons === 'boolean') this.cfg.icons = b.icons; if (typeof b.hibp === 'boolean') this.cfg.audit.hibp = b.hibp; if (typeof b.autoLogin === 'boolean') this.cfg.autoLogin = b.autoLogin; if (b.autofill && typeof b.autofill === 'object') { const a = this.autofillCfg(); for (const k of ['inline', 'onLoad', 'suggest', 'offerSave']) if (typeof b.autofill[k] === 'boolean') a[k] = b.autofill[k]; } if (b.defaultId) this.cfg.defaultId = b.defaultId; this.save(); res.json({ ok: true }); });
+    r.get('/pw', J(async () => ({ autoLogin: this.cfg.autoLogin === true, autofill: this.autofillCfg(), instances: this.list().map((i) => this.info(i)), providers: Object.entries(PROVIDERS).filter(([, p]) => !(p.linux && IS_WIN)).map(([id, p]) => ({ id, label: p.label, fields: p.fields, hint: p.hint, cli: p.cli || null, readonly: !!p.readonly, icons: this.iconSupport(id).ok, iconsWhy: this.iconSupport(id).why })), catalog: this.catalog, formats: formats.allFormats().map((f) => ({ id: f.id, label: f.label })), ext: this.cfg.ext.map(({ hash, ...e }) => e), autoLockMin: this.cfg.autoLockMin ?? 15, hibp: this.cfg.audit.hibp !== false, defaultId: this.cfg.defaultId || null, types: TYPES, members: this.members().length > 0, cli: { bw: this.clis.quick('bw'), op: this.clis.quick('op') }, clipboardSec: this.cfg.clipboardSec ?? 30, lockOnSleep: this.cfg.lockOnSleep !== false, icons: this.cfg.icons !== false, sshDir: (this.ctx.sshKeys && this.ctx.sshKeys.dir) || null }))); // eslint-disable-line no-unused-vars
+    r.put('/pw', (req, res) => { const b = req.body || {}; if (Number.isFinite(Number(b.autoLockMin))) { this.cfg.autoLockMin = Math.max(0, Math.min(240, Number(b.autoLockMin))); for (const s of this.stores.values()) if (s.autoLockMin !== undefined) s.autoLockMin = this.cfg.autoLockMin; } if (Number.isFinite(Number(b.clipboardSec))) this.cfg.clipboardSec = Math.max(0, Math.min(600, Number(b.clipboardSec))); if (typeof b.icons === 'boolean') this.cfg.icons = b.icons; if (typeof b.lockOnSleep === 'boolean') this.cfg.lockOnSleep = b.lockOnSleep; if (typeof b.hibp === 'boolean') this.cfg.audit.hibp = b.hibp; if (typeof b.autoLogin === 'boolean') this.cfg.autoLogin = b.autoLogin; if (b.autofill && typeof b.autofill === 'object') { const a = this.autofillCfg(); for (const k of ['inline', 'onLoad', 'suggest', 'offerSave']) if (typeof b.autofill[k] === 'boolean') a[k] = b.autofill[k]; } if (b.defaultId && this.list().some((x) => x.id === b.defaultId)) this.cfg.defaultId = b.defaultId; this.save(); res.json({ ok: true }); });
     r.post('/pw', J((req) => this.create(req.body || {})));
     // Anbieter-Programme: Zustand (mit Version), aktuelle Version beim Hersteller nur für benötigte
     r.get('/pw/cli', J(async () => { const st = await this.cliStatus(); for (const n of ['bw', 'op']) { if (!st[n].needed) continue; try { st[n].latest = (await this.clis.latest(n)).version; } catch { /* offline */ } } return st; }));
@@ -944,7 +1031,7 @@ class PasswordManager {
       for (const i of this.list()) {
         const s = this.stores.get(i.id); if (!s || s.locked()) continue;
         if (i.type === 'hostwerk') for (const m of s.matches(url)) out.push({ ...m, vault: i.id, vaultName: i.name });
-        else { let h = ''; try { h = new URL(url).hostname; } catch { /* ignore */ } const all = await s.all().catch(() => []); for (const it of all) if (!it.trashed && (it.urls || []).some((u) => u.includes(h))) { const { password, totp, notes, fields, icon, attachments, passkeys, ssh, history, ...rest } = it; out.push({ ...rest, hasTotp: !!totp, hasIcon: !!(icon && icon.data) || !!rest.hasIcon, vault: i.id, vaultName: i.name }); } } // eslint-disable-line no-unused-vars
+        else { let h = ''; try { h = new URL(url).hostname.toLowerCase(); } catch { /* ignore */ } const all = h ? await s.all().catch(() => []) : []; for (const it of all) if (!it.trashed && (!it.type || it.type === 'login') && (it.urls || []).some((u) => siteMatch(h, u))) { const { password, totp, notes, fields, icon, attachments, passkeys, ssh, history, ...rest } = it; out.push({ ...rest, hasTotp: !!totp, hasIcon: !!(icon && icon.data) || !!rest.hasIcon, vault: i.id, vaultName: i.name }); } } // eslint-disable-line no-unused-vars
       }
       return { items: out, locked: this.list().filter((i) => this.info(i).locked).map((i) => ({ id: i.id, name: i.name })) };
     }));
@@ -978,4 +1065,4 @@ class PasswordManager {
   }
 }
 
-module.exports = { PasswordManager };
+module.exports = { PasswordManager, brakeMs, sleptBetween };

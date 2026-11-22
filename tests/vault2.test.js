@@ -196,10 +196,16 @@ test('manager: preview counts duplicates, unencrypted export needs confirmation,
   assert.ok(need.needsMapping && need.head.length === 2);
   const imp = await pm.importFile(v.id, { text });
   assert.strictEqual(imp.added, 1); assert.strictEqual(imp.skipped, 1);
-  await assert.rejects(pm.exportFile(v.id, { kind: 'chrome-csv' }), (e) => e.status === 428);
-  assert.ok((await pm.exportFile(v.id, { kind: 'chrome-csv', plain: true })).data.toString().includes('p2'));
-  await assert.rejects(pm.exportFile(v.id, { kind: 'bitwarden-encrypted', password: 'short' }), /8 characters/);
-  const enc = await pm.exportFile(v.id, { kind: 'bitwarden-encrypted', password: 'export-pass-1' });
+  const M = { master: 'master-pw-123' };
+  // Jeder Export erst nach erneuter Eingabe des Master-Passworts (Hostwerk offen gelassen)
+  await assert.rejects(pm.exportFile(v.id, { kind: 'chrome-csv', plain: true }), (e) => e.status === 401);
+  await assert.rejects(pm.exportFile(v.id, { kind: 'chrome-csv', plain: true, master: 'falsch-123' }), (e) => e.status === 401 && /nothing was exported/.test(e.message));
+  await assert.rejects(pm.exportFile(v.id, { kind: 'kdbx', password: 'export-pass-1' }), (e) => e.status === 401, 'encrypted export too');
+  await assert.rejects(pm.exportFile(v.id, { kind: 'chrome-csv', ...M }), (e) => e.status === 428);
+  assert.ok((await pm.exportFile(v.id, { kind: 'chrome-csv', plain: true, ...M })).data.toString().includes('p2'));
+  await assert.rejects(pm.exportFile(v.id, { kind: 'bitwarden-encrypted', password: 'short', ...M }), /8 characters/);
+  const enc = await pm.exportFile(v.id, { kind: 'bitwarden-encrypted', password: 'export-pass-1', ...M });
+  assert.strictEqual(pm.info(pm.get(v.id)).exportAuth, 'master');
   assert.ok(!enc.data.toString().includes('b.example'), 'nothing readable in the encrypted file'); // (nicht nach „p2“ suchen – kommt zufällig im Base64 vor)
   // Sicherung: Stand anlegen, ändern, zurückholen
   const src = pm.backupSource();
@@ -207,7 +213,17 @@ test('manager: preview counts duplicates, unencrypted export needs confirmation,
   assert.strictEqual(src.list().length, 1);
   await pm.addItem(v.id, { type: 'login', name: 'Later', password: 'x' });
   await src.restore(src.list()[0].id);
+  // Zu kurzes Master-Passwort: kein halber Tresor ohne Datei bleibt zurück
+  const before = pm.list().length;
+  await assert.rejects(pm.create({ type: 'hostwerk', name: 'short', password: 'kurz' }), /8 characters/);
+  assert.strictEqual(pm.list().length, before, 'no orphaned vault');
+  // Falsche Master-Passwörter: der nächste Versuch wartet (Durchprobieren gebremst), ein richtiges setzt das zurück
+  pm.lock(v.id);
+  await assert.rejects(pm.unlock(v.id, 'wrong-pass-1'), (e) => e.status === 401 && /Wrong tries in a row: 1 – the next try waits 0[.,]5 s/.test(e.message));
+  const t0 = Date.now(); await assert.rejects(pm.unlock(v.id, 'wrong-pass-2'), (e) => e.status === 401 && /Wrong tries in a row: 2/.test(e.message));
+  assert.ok(Date.now() - t0 >= 450, 'second wrong attempt is slowed down');
   await pm.unlock(v.id, 'master-pw-123');
+  assert.ok(!pm.unlockFails.get(v.id), 'a correct password resets the counter');
   assert.ok(!(await pm.items(v.id)).some((x) => x.name === 'Later'), 'restored the older state');
   assert.strictEqual(src.list().length, 2, 'the state before restoring was kept too');
   const stats = await pm.stats(v.id);
@@ -256,4 +272,61 @@ test('Hostwerk 3.0+ (SDK 3.3): Symbole und SSH-Schlüssel über Hostwerks stabil
   const key = ['HKCU', 'Software', 'Google', 'Chrome', 'Extensions', 'abc'].join('\\');
   pm.trace({ kind: 'registry', id: 'browser-chrome', label: key, remove: { key } });
   assert.ok(calls.some((c) => c[0] === 'trace' && c[1] === 'registry' && c[2] === 'browser-chrome'));
+});
+
+test('wrong master passwords: brake grows to 5 s, every 5th in a row lands in the change log', async () => {
+  const { brakeMs } = require('../server/manager');
+  assert.deepStrictEqual([0, 1, 4, 10, 99].map(brakeMs), [0, 500, 2000, 5000, 5000]);
+  const { pm, ctx } = manager();
+  const log = []; ctx.audit.record = (e) => log.push(e.action);
+  const v = await pm.create({ type: 'hostwerk', name: 'Log', password: 'master-pw-123' });
+  pm.lock(v.id);
+  pm.unlockFails = new Map([[v.id, 4]]); pm.unlockQ = new Map();
+  const realTimeout = global.setTimeout; global.setTimeout = (fn, ms, ...a) => realTimeout(fn, Math.min(ms, 5), ...a); // ohne echte Pause
+  try { await assert.rejects(pm.unlock(v.id, 'wrong-pass-5'), (e) => /Wrong tries in a row: 5/.test(e.message)); } finally { global.setTimeout = realTimeout; }
+  assert.ok(log.some((x) => /5 wrong master passwords in a row/.test(x)), log.join(' | '));
+});
+
+test('sleep: a jump of the clock locks every open vault (setting on by default) and is logged', async () => {
+  const { sleptBetween } = require('../server/manager');
+  assert.ok(!sleptBetween(0, 15000)); assert.ok(!sleptBetween(0, 60000)); assert.ok(sleptBetween(0, 10 * 60000));
+  const { pm, S, ctx } = manager();
+  const log = []; ctx.audit.record = (e) => log.push(`${e.target}: ${e.action}`);
+  const v = await pm.create({ type: 'hostwerk', name: 'Sleepy', password: 'master-pw-123' });
+  assert.ok(!pm.info(pm.get(v.id)).locked);
+  pm.lastTick = 1000;
+  assert.strictEqual(pm.checkSleep(1000 + 15000), false, 'normal tick');
+  assert.ok(!pm.info(pm.get(v.id)).locked);
+  assert.strictEqual(pm.checkSleep(1000 + 15000 + 30 * 60000), true, 'after 30 minutes away');
+  assert.ok(pm.info(pm.get(v.id)).locked);
+  assert.ok(log.some((x) => x === 'Sleepy: Locked after sleep'), log.join(' | '));
+  await pm.unlock(v.id, 'master-pw-123');
+  S.passwords.lockOnSleep = false;
+  pm.lastTick = 0; assert.strictEqual(pm.checkSleep(3600000), false, 'setting off');
+  assert.ok(!pm.info(pm.get(v.id)).locked);
+});
+
+test('API checks: share only existing items, KeePass needs a file', async () => {
+  const { pm } = manager();
+  const v = await pm.create({ type: 'hostwerk', name: 'Share', password: 'master-pw-123' });
+  pm.members = () => [{ id: 'u1', name: 'Lena', role: 'member' }];
+  await assert.rejects(pm.setShare(v.id, 'does-not-exist', { u1: 'read' }), (e) => e.status === 404);
+  assert.strictEqual(pm.getShare(v.id, 'does-not-exist') && Object.keys(pm.getShare(v.id, 'does-not-exist')).length, 0, 'no orphaned share');
+  const it = await pm.addItem(v.id, { type: 'login', name: 'Wifi', password: 'x' });
+  await pm.setShare(v.id, it.id, { u1: 'read' });
+  assert.deepStrictEqual(pm.getShare(v.id, it.id), { u1: 'read' });
+  await pm.setShare(v.id, 'does-not-exist', {}); // Aufräumen geht immer
+  const before = pm.list().length;
+  await assert.rejects(pm.create({ type: 'keepass', name: 'KP', cfg: {} }), (e) => e.status === 400 && /kdbx/.test(e.message));
+  assert.strictEqual(pm.list().length, before, 'nothing created');
+});
+
+test('export of a provider vault without a stored password: the vault name confirms', async () => {
+  const { pm } = manager();
+  const i = { id: 'pass-x', name: 'Mein Store', type: 'pass', cfg: {}, createdAt: 1 };
+  pm.list().push(i);
+  assert.strictEqual(pm.reauthKind(i), 'name');
+  await assert.rejects(pm.reauth(i.id, { confirm: 'falsch' }), (e) => e.status === 401);
+  pm.reauthFails.clear();
+  assert.strictEqual(await pm.reauth(i.id, { confirm: '  mein   store ' }), true);
 });

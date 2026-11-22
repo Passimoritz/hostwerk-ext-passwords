@@ -128,7 +128,8 @@ function parseOtp(input) {
 }
 function totp(input, at = Date.now()) {
   const o = parseOtp(input);
-  if (!o.secret) return null;
+  // Ohne ein einziges Base32-Zeichen gäbe es sonst einen Schein-Code (leerer Schlüssel)
+  if (!o.secret || !/[A-Z2-7]/i.test(o.secret)) return null;
   const counter = Math.floor(at / 1000 / o.period);
   const msg = Buffer.alloc(8); msg.writeBigUInt64BE(BigInt(counter));
   const algo = { SHA1: 'sha1', SHA256: 'sha256', SHA512: 'sha512' }[o.algorithm] || 'sha1';

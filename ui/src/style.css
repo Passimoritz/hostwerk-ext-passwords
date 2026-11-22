@@ -50,6 +50,8 @@
 .pw-detail-head { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .pw-detail-head .pw-ico { width: 40px; height: 40px; }
 .pw-detail-title { min-width: 0; }
+/* Art · Ordner · „Eigenes Bild“: umbrechen statt unter die Knöpfe daneben (Favorit, Teilen …) zu laufen */
+.pw-detail-title > .row-tight { flex-wrap: wrap; row-gap: 2px; min-width: 0; }
 .pw-detail-title h2 { margin: 0; font-size: var(--fs-lg); }
 .pw-detail-actions { flex-wrap: wrap; }
 .pw-fav-on { color: var(--warn); }
@@ -127,7 +129,7 @@ pre.pw-row-value, .pw-notes { margin: 0; white-space: pre-wrap; word-break: brea
   .pw-nav-btn { flex: none; }
   .pw-switch, .pw-new { flex: none; width: auto; }
   .pw-app.has-sel .pw-list-col { display: none; }
-  .pw-app:not(.has-sel) .pw-detail-col { display: none; }
+  .pw-app:not(.has-sel):not(.is-empty) .pw-detail-col { display: none; }
   .pw-back { display: inline-flex; }
   .pw-list { max-height: none; }
 }
@@ -207,3 +209,21 @@ pre.pw-row-value, .pw-notes { margin: 0; white-space: pre-wrap; word-break: brea
 .pw-tile { gap: var(--sp-2); }
 .pw-tile-score { font-size: var(--fs-2xl); font-weight: 700; line-height: 1; }
 .pw-tile-counts { flex-wrap: wrap; }
+/* Name mit Stern (Standard-Tresor, Favorit): der Name kürzt sich, der Stern bleibt sichtbar */
+.pw-card-name, .pw-item-name { min-width: 0; flex-wrap: nowrap; gap: var(--sp-1); }
+.pw-card-name > .ellipsis, .pw-item-name > .ellipsis { min-width: 0; }
+.pw-star, .pw-item-name .pw-fav-mark { flex: none; margin-left: 0; }
+/* Leerer Tresor in schmalen Fenstern: Knöpfe brechen um statt aus der Spalte zu ragen */
+.pw-detail-col .empty-state .row-tight { flex-wrap: wrap; justify-content: center; }
+/* Langer Tresorname im Seitenkopf: eine Zeile mit „…“ statt drei umbrochener Zeilen neben den Knöpfen */
+.pw-head-text { min-width: 0; flex: 1 1 260px; }
+.pw-head-text h1 { min-width: 0; }
+.pw-h1-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Mittlere Fenster (z. B. 1024 px neben Hostwerks Seitenleiste): drei Spalten ließen dem Eintrag nur ~150 px –
+   dann Liste ODER Eintrag neben den Ordnern, mit „←“ zurück zur Liste (wie in schmalen Fenstern) */
+@media (min-width: 901px) and (max-width: 1199px) {
+  .pw-app { grid-template-columns: 200px minmax(0, 1fr); }
+  .pw-app.has-sel .pw-list-col { display: none; }
+  .pw-app:not(.has-sel):not(.is-empty) .pw-detail-col { display: none; }
+  .pw-back { display: inline-flex; }
+}

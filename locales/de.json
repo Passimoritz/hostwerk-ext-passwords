@@ -1,5 +1,11 @@
 {
   "Developer": "Entwickler",
+  "The file is not valid JSON – maybe it is incomplete or not an export file.": "Die Datei ist kein gültiges JSON – vielleicht ist sie unvollständig oder keine Export-Datei.",
+  "Choose another vault as the target.": "Wähle einen anderen Tresor als Ziel.",
+  "Empty the trash?": "Papierkorb leeren?",
+  "{n} items are deleted for good – this cannot be undone.": "{n} Einträge werden endgültig gelöscht – das lässt sich nicht rückgängig machen.",
+  "Restored": "Zurückgeholt",
+  "e.g. work, bank": "z. B. Arbeit, Bank",
   "{name} is connected to Hostwerk": "{name} ist mit Hostwerk verbunden",
   "Pin the Hostwerk icon in the browser bar – from now on suggestions show up right in the sign-in field.": "Hostwerk-Symbol in der Browserleiste anheften – Vorschläge erscheinen ab jetzt direkt im Anmeldefeld.",
   "Click “Add” in {label}": "In {label} „Hinzufügen“ klicken",
@@ -750,5 +756,20 @@
   "Locking": "Sperren",
   "Filling in": "Ausfüllen",
   "General": "Allgemein",
-  "$patterns": []
+  "$patterns": [],
+  "Confirm the export": "Export bestätigen",
+  "An export contains every password. To confirm, type the name of the vault: {name}": "Ein Export enthält alle Passwörter. Tippe zur Bestätigung den Namen des Tresors ein: {name}",
+  "Name of the vault": "Name des Tresors",
+  "Continue": "Weiter",
+  "An export contains every password. Enter the master password of “{name}” again to continue.": "Ein Export enthält alle Passwörter. Gib das Master-Passwort von „{name}“ noch einmal ein, um fortzufahren.",
+  "{what} – clipboard cleared": "{what} – Zwischenablage geleert",
+  "Lock when the PC sleeps": "Sperren, wenn der PC schläft",
+  "After sleep or hibernation every vault is locked – the master password is needed again.": "Nach Energiesparmodus oder Ruhezustand werden alle Tresore gesperrt – danach ist das Master-Passwort wieder nötig.",
+  "Locked after sleep": "Nach dem Ruhezustand gesperrt",
+  "Wrong tries in a row: {n} – the next try waits {s} s.": "Fehlversuche hintereinander: {n} – der nächste Versuch wartet {s} s.",
+  "{n} wrong master passwords in a row": "{n} falsche Master-Passwörter hintereinander",
+  "Export refused (wrong master password)": "Export abgelehnt (falsches Master-Passwort)",
+  "Export refused (wrong name)": "Export abgelehnt (falscher Name)",
+  "Wrong master password – nothing was exported.": "Falsches Master-Passwort – nichts wurde exportiert.",
+  "The name does not match – nothing was exported.": "Der Name stimmt nicht – nichts wurde exportiert."
 }

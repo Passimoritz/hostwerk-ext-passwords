@@ -16,9 +16,31 @@ export const TYPE_LABEL = { login: 'Login', note: 'Note', card: 'Card', identity
 
 /* ---------- clipboard: cleared again after the set time (only if the same value is still there) ---------- */
 export const clip = { sec: 30 };
-export const clearLater = (text) => { if (!clip.sec) return; setTimeout(async () => { try { const cur = await navigator.clipboard.readText(); if (cur === text) await navigator.clipboard.writeText(''); } catch { /* without read access: better not overwrite anything */ } }, clip.sec * 1000); };
+// Ohne Fokus (Passwort gerade in einem anderen Programm eingefügt) erlaubt der Browser weder Lesen noch Leeren – dann beim
+// nächsten Zurückkommen ins Fenster nachholen, statt das Passwort dauerhaft in der Zwischenablage zu lassen
+export const clearLater = (text, sec = clip.sec) => {
+  if (!sec) return;
+  const wipe = async (retry) => { try { const cur = await navigator.clipboard.readText(); if (cur === text) await navigator.clipboard.writeText(''); } catch { if (retry) window.addEventListener('focus', () => setTimeout(() => wipe(false), 300), { once: true }); } };
+  setTimeout(() => wipe(true), sec * 1000);
+};
+/** Restzeit bis zum Leeren der Zwischenablage, sekündlich heruntergezählt (Inhalt der Meldung). */
+function ClipCountdown({ what, sec }) {
+  const [left, setLeft] = useState(sec);
+  useEffect(() => {
+    const end = Date.now() + sec * 1000;
+    const id = setInterval(() => { const n = Math.max(0, Math.ceil((end - Date.now()) / 1000)); setLeft(n); if (!n) clearInterval(id); }, 250);
+    return () => clearInterval(id);
+  }, [sec]);
+  return <span role="timer" aria-live="off">{left > 0 ? t('{what} – cleared from the clipboard in {n} seconds', { what, n: left }) : t('{what} – clipboard cleared', { what })}</span>;
+}
 export const copy = async (text, what) => {
-  try { await navigator.clipboard.writeText(text); clearLater(text); toast.success(clip.sec ? t('{what} – cleared from the clipboard in {n} seconds', { what: what || t('Copied'), n: clip.sec }) : (what || t('Copied'))); } catch { toast.error(t('Clipboard not available')); }
+  try {
+    await navigator.clipboard.writeText(text); clearLater(text);
+    const label = what || t('Copied');
+    // Mit Countdown: die Meldung bleibt bis zum Leeren stehen (höchstens eine Minute, danach wie gewohnt nur der Text)
+    if (clip.sec) toast(<ClipCountdown what={label} sec={clip.sec} />, 'success', Math.min(clip.sec, 60) * 1000 + 800);
+    else toast.success(label);
+  } catch { toast.error(t('Clipboard not available')); }
 };
 
 const SCORE_COLOR = ['var(--err)', 'var(--err)', 'var(--warn)', 'var(--ok)', 'var(--ok)'];
@@ -133,7 +155,7 @@ export function Generator({ onUse, site: initialSite = '' }) {
   const [opts, setOpts] = useState({ length: 20, lower: true, upper: true, digits: true, symbols: true, words: 0 });
   const [out, setOut] = useState(null);
   const [site, setSite] = useState(initialSite);
-  const gen = async (o = opts) => setOut(await post('/pw/generate', o));
+  const gen = async (o = opts) => { try { setOut(await post('/pw/generate', o)); } catch (e) { toast.error(e.message); } };
   // Neu erzeugen, sobald sich eine Einstellung ändert (auch beim ersten Anzeigen)
   useEffect(() => { const x = setTimeout(() => gen(opts), 120); return () => clearTimeout(x); }, [opts]); // eslint-disable-line react-hooks/exhaustive-deps
   // Regel der Seite übernehmen (falls es eine gibt)
@@ -224,8 +246,8 @@ export function ItemView({ v, id, onEdit, onChanged, onBack, iconWhy = null }) {
     if (!res.ok) { toast.error(t('The attachment cannot be opened.')); return; }
     const url = URL.createObjectURL(await res.blob()); const el = document.createElement('a'); el.href = url; el.download = a.name; el.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
-  const dropFile = async (a) => { if (!(await confirmDialog({ title: t('Remove “{name}”?', { name: a.name }), confirm: t('Remove'), danger: true }))) return; await del(`/pw/${v.id}/items/${id}/files/${a.id}`); load(); onChanged(id); };
-  const dropPasskey = async (p) => { if (!(await confirmDialog({ title: t('Remove the passkey for {rp}?', { rp: p.rpId }), text: t('Signing in with this passkey no longer works from an export of this vault. The passkey in your browser or phone stays.'), confirm: t('Remove'), danger: true }))) return; await del(`/pw/${v.id}/items/${id}/passkeys`, { credentialId: p.credentialId }); load(); };
+  const dropFile = async (a) => { if (!(await confirmDialog({ title: t('Remove “{name}”?', { name: a.name }), confirm: t('Remove'), danger: true }))) return; try { await del(`/pw/${v.id}/items/${id}/files/${a.id}`); } catch (e) { toast.error(e.message); } load(); onChanged(id); };
+  const dropPasskey = async (p) => { if (!(await confirmDialog({ title: t('Remove the passkey for {rp}?', { rp: p.rpId }), text: t('Signing in with this passkey no longer works from an export of this vault. The passkey in your browser or phone stays.'), confirm: t('Remove'), danger: true }))) return; try { await del(`/pw/${v.id}/items/${id}/passkeys`, { credentialId: p.credentialId }); } catch (e) { toast.error(e.message); } load(); };
   const sshInstall = async () => {
     const name = await promptDialog({ title: t('Hand the key to Hostwerk'), text: t('Hostwerk saves it as a file in your SSH folder ({dir}) – then it shows up under SSH keys and works for Git, SFTP and publishing. Existing files are never overwritten.', { dir: '~/.ssh' }), label: t('File name'), value: `id_${(it.ssh.keyType || 'key').replace(/^ssh-/, '').replace(/\W/g, '')}_${it.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)}`, confirm: t('Save') });
     if (!name) return;
@@ -288,6 +310,8 @@ export function ItemDialog({ v, item, preset = 'login', onClose, onSaved }) {
   const [gen, setGen] = useState(false);
   const [st, setSt] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Schlagwörter als Text: sonst verschwände das Komma beim Tippen sofort wieder („a,“ → „a“)
+  const [tagText, setTagText] = useState(() => (f.tags || []).join(', '));
   const own = v.type === 'hostwerk';
   useEffect(() => { const x = setTimeout(() => { if (f.password) post('/pw/strength', { password: f.password }).then(setSt).catch(() => {}); else setSt(null); }, 250); return () => clearTimeout(x); }, [f.password]);
   const set = (k, val) => setF((o) => ({ ...o, [k]: val }));
@@ -334,7 +358,7 @@ export function ItemDialog({ v, item, preset = 'login', onClose, onSaved }) {
             {f.ssh.fingerprint && <div className="span-2 tiny muted mono">{f.ssh.fingerprint}</div>}
           </>}
           <Field label="Folder"><input className="input" value={f.folder} onChange={(e) => set('folder', e.target.value)} list="pw-folders" placeholder={t('e.g. Work/Servers')} /></Field>
-          <Field label="Tags (comma)"><input className="input" value={(f.tags || []).join(', ')} onChange={(e) => set('tags', e.target.value.split(',').map((x) => x.trim()).filter(Boolean))} /></Field>
+          <Field label="Tags (comma)"><input className="input" value={tagText} onChange={(e) => { setTagText(e.target.value); set('tags', [...new Set(e.target.value.split(',').map((x) => x.trim()).filter(Boolean))]); }} placeholder={t('e.g. work, bank')} /></Field>
           <Field label={T === 'note' ? t('Note') : t('Notes')} className="span-2"><textarea className="input" rows={T === 'note' ? 10 : 3} value={f.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
         </div>
         <div>

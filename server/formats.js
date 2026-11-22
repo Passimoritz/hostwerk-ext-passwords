@@ -97,7 +97,8 @@ function detectAndParse(text, { mapping = null } = {}) {
 }
 
 function parseJson(t) {
-  const j = JSON.parse(t);
+  let j;
+  try { j = JSON.parse(t); } catch { throw Object.assign(new Error(T('The file is not valid JSON – maybe it is incomplete or not an export file.')), { status: 400 }); }
   if (j && j.encrypted === true && !Array.isArray(j.items)) {
     if (j.passwordProtected) throw Object.assign(new Error(T('This Bitwarden export is protected with a password – enter it to import.')), { status: 428, needsPassword: true });
     throw new Error(T('This Bitwarden export is locked to the Bitwarden account (“account restricted”). Export again with “Password protected” or unencrypted – or connect the account directly.'));

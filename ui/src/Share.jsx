@@ -3,8 +3,9 @@ import { Copy, Eye, EyeOff, KeyRound, Lock, Users, ShieldCheck } from 'lucide-re
 import { get, post, put, useApi, useRefresh } from '@hostwerk/api';
 import { Btn, Empty, Loading, Modal, Seg, toast, useInterval } from '@hostwerk/ui';
 import { t } from '@hostwerk/i18n';
+import { clearLater } from './Item';
 
-const copyText = async (x, msg) => { try { await navigator.clipboard.writeText(x); toast.success(msg); setTimeout(() => navigator.clipboard.writeText('').catch(() => {}), 45000); } catch { toast.error('Copying is not possible'); } };
+const copyText = async (x, msg) => { try { await navigator.clipboard.writeText(x); toast.success(msg); clearLater(x, 45); } catch { toast.error(t('Copying is not possible')); } };
 
 /** Share an item with members: per member "not", "view & copy" or "copy only". */
 export function ShareDialog({ vault, item, name, onClose }) {

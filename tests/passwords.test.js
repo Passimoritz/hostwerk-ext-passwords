@@ -59,6 +59,10 @@ test('vault file: create, lock, wrong password (German), items, trash, history',
   assert.strictEqual(v.get(it.id).history[0].password, 'one-1', 'old password kept in the history');
   assert.ok(!('password' in v.list()[0]) && v.list()[0].hasPassword, 'lists never contain secrets');
   assert.strictEqual(v.matches('https://api.github.com/x').length, 1, 'subdomains match');
+  assert.strictEqual(v.matches('https://notgithub.com/').length, 0, 'other domains do not match');
+  const { siteMatch } = require('../server/store');
+  assert.ok(!siteMatch('evil.co.uk', 'https://bank.co.uk') && siteMatch('login.bank.co.uk', 'www.bank.co.uk'), 'co.uk: the real domain counts');
+  assert.ok(!siteMatch('a.github.io', 'b.github.io') && !siteMatch('10.0.178.20', '192.168.178.20'), 'shared hosts and IP addresses only match exactly');
   v.trash(it.id, true);
   assert.strictEqual(v.list().length, 0); assert.strictEqual(v.list({ trashed: '1' }).length, 1);
   assert.strictEqual(v.list({ trashed: '0' }).length, 0, '"0" from the address bar is not true');
@@ -107,8 +111,8 @@ test('sharing with members: only known members, end date in the past refused, ex
   const { pm } = manager();
   const v = await pm.create({ type: 'hostwerk', name: 'Shared', password: 'master-pw-123' });
   const it = await pm.addItem(v.id, { type: 'login', name: 'Wi-Fi', username: 'guest', password: 'Guest-Pass-1' });
-  assert.throws(() => pm.setShare(v.id, it.id, { m1: 'read' }, { m1: Date.now() - 1000 }), /end date is in the past/);
-  const r = pm.setShare(v.id, it.id, { m1: 'read', ghost: 'read' });
+  await assert.rejects(pm.setShare(v.id, it.id, { m1: 'read' }, { m1: Date.now() - 1000 }), /end date is in the past/);
+  const r = await pm.setShare(v.id, it.id, { m1: 'read', ghost: 'read' });
   assert.deepStrictEqual(Object.keys(r.users), ['m1'], 'unknown members ignored');
   assert.strictEqual((await pm.sharedWith('m1'))[0].name, 'Wi-Fi');
   assert.strictEqual((await pm.revealShared('m1', `${v.id}:${it.id}`, 'Helper')).password, 'Guest-Pass-1');

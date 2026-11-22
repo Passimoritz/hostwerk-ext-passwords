@@ -71,7 +71,7 @@ test('export → import keeps everything; transfer copies between vaults', async
   await pm.addItem(a.id, { type: 'login', name: 'Mail', username: 'me@x', password: 'Pw,with"quote', urls: ['https://mail.x'], folder: 'Work', totp: 'JBSWY3DPEHPK3PXP', notes: 'line1\nline2' });
   await pm.addItem(a.id, { type: 'login', name: 'Shop', username: 'me', password: 'pw2' });
   for (const kind of ['bitwarden-json', 'bitwarden-csv', 'generic-csv']) {
-    const e = await pm.exportText(a.id, kind);
+    const e = await pm.exportText(a.id, kind, { master: 'master-pw-123' });
     const back = formats.detectAndParse(e.text).items;
     const mail = back.find((x) => x.name === 'Mail');
     assert.strictEqual(mail.password, 'Pw,with"quote', kind);
@@ -91,8 +91,8 @@ test('KeePass export: a real .kdbx that opens again with its own password', asyn
   await pm.addItem(v.id, { type: 'login', name: 'GitHub', username: 'alex', password: 'gh-secret', urls: ['https://github.com'], folder: 'Dev/Code', totp: 'JBSWY3DPEHPK3PXP', fields: [{ name: 'PIN', value: '1234', hidden: true }] });
   const gone = await pm.addItem(v.id, { type: 'login', name: 'Old', password: 'x' });
   await pm.removeItem(v.id, gone.id);
-  await assert.rejects(pm.exportKdbx(v.id, 'short'), /8 characters/);
-  const e = await pm.exportKdbx(v.id, 'kdbx-pass-1');
+  await assert.rejects(pm.exportKdbx(v.id, 'short', { master: 'master-pw-123' }), /8 characters/);
+  const e = await pm.exportKdbx(v.id, 'kdbx-pass-1', { master: 'master-pw-123' });
   assert.ok(e.name.endsWith('.kdbx') && Buffer.isBuffer(e.data));
   const kdbx = lib('kdbxweb');
   const db = await kdbx.Kdbx.load(new Uint8Array(e.data).buffer, new kdbx.Credentials(kdbx.ProtectedValue.fromString('kdbx-pass-1')));
@@ -135,11 +135,11 @@ test('sharing: change and take back rights, admins are never targets, expired sh
   const { pm } = manager();
   const v = await pm.create({ type: 'hostwerk', name: 'S', password: 'master-pw-123' });
   const it = await pm.addItem(v.id, { type: 'login', name: 'Router', username: 'admin', password: 'R-1' });
-  pm.setShare(v.id, it.id, { m1: 'read', m2: 'read', a: 'read' });
+  await pm.setShare(v.id, it.id, { m1: 'read', m2: 'read', a: 'read' });
   assert.deepStrictEqual(Object.keys(pm.getShare(v.id, it.id)).sort(), ['m1', 'm2'], 'admins see everything anyway – no share');
-  pm.setShare(v.id, it.id, { m1: 'read' });
+  await pm.setShare(v.id, it.id, { m1: 'read' });
   assert.strictEqual((await pm.sharedWith('m2')).length, 0, 'taken back');
-  pm.setShare(v.id, it.id, { m1: 'read' }, { m1: Date.now() + 60000 });
+  await pm.setShare(v.id, it.id, { m1: 'read' }, { m1: Date.now() + 60000 });
   assert.ok(pm.getShareUntil(v.id, it.id).m1 > Date.now());
   pm.shares[`${v.id}:${it.id}`].until = { m1: Date.now() - 1 };
   pm.expireShares();

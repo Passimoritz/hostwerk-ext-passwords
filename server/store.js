@@ -38,6 +38,21 @@ const MAX_FILES = 50 * 1024 * 1024; // all attachments of a vault
 const MAX_ICON = 128 * 1024; // eigenes Bild je Eintrag (die Oberfläche verkleinert vorher auf 128 px)
 const PASSKEY_KEYS = ['credentialId', 'keyType', 'keyAlgorithm', 'keyCurve', 'keyValue', 'rpId', 'rpName', 'userHandle', 'userName', 'userDisplayName', 'counter', 'discoverable', 'creationDate'];
 const hostOf = (u) => { try { return new URL(/^[a-z][\w+.-]*:\/\//i.test(u) ? u : `https://${u}`).hostname.toLowerCase(); } catch { return ''; } };
+// Eigentliche Domain einer Adresse („Basis“): sonst passten evil.co.uk und bank.co.uk oder zwei *.github.io-Seiten
+// zueinander, und IP-Adressen mit gleichen letzten zwei Zahlen (10.0.178.20 / 192.168.178.20) ebenso
+const SHARED_SUFFIX = /\.(github\.io|gitlab\.io|herokuapp\.com|netlify\.app|vercel\.app|pages\.dev|workers\.dev|web\.app|firebaseapp\.com|appspot\.com|azurewebsites\.net|cloudfront\.net|blogspot\.com|duckdns\.org|ddns\.net|no-ip\.org|myfritz\.net|dyndns\.org)$/;
+function siteBase(h) {
+  if (!h || /^[\d.]+$/.test(h) || h.includes(':') || !h.includes('.')) return h; // IP, IPv6, localhost: nur genau gleich
+  const p = h.split('.');
+  const n = SHARED_SUFFIX.test(h) || (p.length > 2 && /^[a-z]{2}$/.test(p[p.length - 1]) && /^(co|com|org|net|gov|ac|edu|or|ne|go|gv|ltd|plc|nom|sch)$/.test(p[p.length - 2])) ? 3 : 2;
+  return p.slice(-n).join('.');
+}
+/** Passt ein gespeicherter Eintrag (Adresse u) zur Seite mit dem Host h0? Gleich, Subdomain oder gleiche eigentliche Domain. */
+function siteMatch(h0, u) {
+  const h = hostOf(u) || String(u || '').toLowerCase();
+  if (!h0 || !h) return false;
+  return h === h0 || h.endsWith('.' + h0) || h0.endsWith('.' + h) || siteBase(h) === siteBase(h0);
+}
 
 class VaultStore {
   constructor(file, { autoLockMin = 15 } = {}) {
@@ -238,8 +253,7 @@ class VaultStore {
   matches(url) {
     let h0 = ''; try { h0 = new URL(url).hostname.toLowerCase(); } catch { h0 = String(url || '').toLowerCase(); }
     if (!h0) return [];
-    const base = h0.split('.').slice(-2).join('.');
-    return this.all().filter((i) => i.type === 'login' && (i.urls || []).some((u) => { const h = hostOf(u) || u.toLowerCase(); return h === h0 || h.endsWith('.' + h0) || h0.endsWith('.' + h) || (h.split('.').slice(-2).join('.') === base); })).map((i) => this.pub(i));
+    return this.all().filter((i) => i.type === 'login' && (i.urls || []).some((u) => siteMatch(h0, u))).map((i) => this.pub(i));
   }
 }
 
@@ -262,4 +276,4 @@ function iconOf(x) {
   return mime ? { mime, data: d.toString('base64'), v: Date.now() } : null;
 }
 
-module.exports = { VaultStore, TYPES, MAX_FILE, MAX_FILES, MAX_ICON, hostOf, imageMime, iconOf };
+module.exports = { VaultStore, TYPES, MAX_FILE, MAX_FILES, MAX_ICON, hostOf, siteMatch, imageMime, iconOf };

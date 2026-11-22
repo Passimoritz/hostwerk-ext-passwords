@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { KeyRound, Lock, Unlock, Plus, Search, Star, Trash2, ShieldCheck, Upload, Globe, Folder, StickyNote, CreditCard, User, Wand2, AlertTriangle, XCircle, CheckCircle2, Info, ArrowRightLeft, Settings2, Link2, KeySquare, Fingerprint, Paperclip, Tag, RotateCcw, Keyboard } from 'lucide-react';
 import { get, post, on, fmtDate, waitJob } from '@hostwerk/api';
-import { Btn, Empty, Loading, Callout, toast, InfoTip } from '@hostwerk/ui';
+import { Btn, Empty, Loading, Callout, toast, InfoTip, confirmDialog } from '@hostwerk/ui';
 import { SvcImage, AiHint } from '@hostwerk/kit';
 import { t } from '@hostwerk/i18n';
 import { ItemView, ItemDialog, Generator, SiteIcon, StrengthDot, TYPE_LABEL, copy, clip, iconSrc } from './Item';
@@ -160,7 +160,7 @@ function VaultApp({ v, data, reload, initialTab }) {
   const NavBtn = ({ k, label, icon: I, n, badge }) => <button type="button" className={`pw-nav-btn ${nav === k ? 'active' : ''}`} aria-current={nav === k ? 'page' : undefined} onClick={() => setNav(k)}><I size={15} aria-hidden="true" /><span className="grow ellipsis">{label}</span>{badge ? <span className="badge err">{badge}</span> : n != null ? <span className="pw-nav-n">{n}</span> : null}</button>;
   const switcher = data.instances.length > 1;
   return (
-    <div className={`pw-app ${sel && !tool ? 'has-sel' : ''} ${tool ? 'has-tool' : ''}`}>
+    <div className={`pw-app ${sel && !tool ? 'has-sel' : ''} ${tool ? 'has-tool' : ''} ${empty ? 'is-empty' : ''}`}>
       <datalist id="pw-folders">{folders.map((f) => <option key={f.name} value={f.name} />)}</datalist>
       <nav className="pw-nav" aria-label={t('Vault navigation')}>
         {switcher && <select className="select sm pw-switch" aria-label={t('Switch vault')} value={v.id} onChange={(e) => { location.hash = `#/ext/passwords/${e.target.value}`; }}>{data.instances.map((x) => <option key={x.id} value={x.id}>{x.name}{x.locked ? ` · ${t('locked')}` : ''}</option>)}</select>}
@@ -169,7 +169,7 @@ function VaultApp({ v, data, reload, initialTab }) {
         {folders.length > 0 && <div className="pw-nav-group"><div className="pw-nav-title">{t('Folders')}</div>{folders.map((f) => <NavBtn key={f.name} k={`folder:${f.name}`} label={f.name} icon={Folder} n={f.count} />)}</div>}
         {tags.length > 0 && <div className="pw-nav-group"><div className="pw-nav-title">{t('Tags')}</div>{tags.slice(0, 20).map((x) => <NavBtn key={x.name} k={`tag:${x.name}`} label={x.name} icon={Tag} n={x.count} />)}</div>}
         {own && <div className="pw-nav-group"><NavBtn k="trash" label={t('Trash')} icon={Trash2} n={cnt('trash') || null} /></div>}
-        <div className="pw-nav-group pw-nav-tools">{TOOLS.map((x) => <NavBtn key={x.key} k={x.key} label={t(x.label)} icon={x.icon} badge={x.key === 'tool:audit' ? issues || null : null} />)}<button type="button" className="pw-nav-btn" onClick={async () => { await post(`/pw/${v.id}/lock`); reload(); }}><Lock size={15} aria-hidden="true" /><span className="grow">{t('Lock')}</span></button></div>
+        <div className="pw-nav-group pw-nav-tools">{TOOLS.map((x) => <NavBtn key={x.key} k={x.key} label={t(x.label)} icon={x.icon} badge={x.key === 'tool:audit' ? issues || null : null} />)}<button type="button" className="pw-nav-btn" onClick={async () => { try { await post(`/pw/${v.id}/lock`); } catch (e) { toast.error(e.message); } reload(); }}><Lock size={15} aria-hidden="true" /><span className="grow">{t('Lock')}</span></button></div>
       </nav>
 
       {!tool && <section className="pw-list-col" aria-label={t('Items')}>
@@ -177,14 +177,14 @@ function VaultApp({ v, data, reload, initialTab }) {
           <div className="input-icon grow"><Search aria-hidden="true" /><input ref={search} className="input sm" type="search" aria-label={t('Search (Ctrl+F)')} placeholder={t('Search …')} value={q} onChange={(e) => setQ(e.target.value)} /></div>
           <InfoTip icon={Keyboard}>{t('Ctrl+F search · ↑/↓ choose · Ctrl+C copy password · Ctrl+Shift+C copy username')}</InfoTip>
         </div>
-        {nav === 'trash' && items && items.length > 0 && <div className="pw-list-bar"><span className="tiny muted grow">{t('Items in the trash stay until you empty it.')}</span><Btn className="xs ghost" onClick={async () => { const r = await post(`/pw/${v.id}/trash/empty`); toast.success(t('{n} deleted for good', { n: r.removed })); load(); }}>Empty trash</Btn></div>}
+        {nav === 'trash' && items && items.length > 0 && <div className="pw-list-bar"><span className="tiny muted grow">{t('Items in the trash stay until you empty it.')}</span><Btn className="xs ghost" onClick={async () => { if (!(await confirmDialog({ title: t('Empty the trash?'), text: t('{n} items are deleted for good – this cannot be undone.', { n: items.length }), confirm: t('Empty trash'), danger: true }))) return; try { const r = await post(`/pw/${v.id}/trash/empty`); toast.success(t('{n} deleted for good', { n: r.removed })); } catch (e) { toast.error(e.message); } load(); }}>Empty trash</Btn></div>}
         <div ref={list} className="pw-list" role="listbox" aria-label={t('Items')}>
           {!items ? <Loading /> : items.length === 0 ? (empty ? null : <div className="pw-list-none small muted">{q ? t('Nothing found for “{q}”.', { q }) : nav === 'trash' ? t('The trash is empty.') : t('Nothing here yet.')}</div>) : items.map((it) => (
             <div key={it.id} data-id={it.id} className={`pw-item ${sel === it.id ? 'active' : ''}`} role="option" aria-selected={sel === it.id} tabIndex={sel === it.id || (!sel && it === items[0]) ? 0 : -1} onClick={() => setSel(it.id)} onKeyDown={(e) => { if (e.key === 'Enter') setSel(it.id); }}>
               <SiteIcon src={iconSrc(v.id, it)} host={it.host} name={it.name} type={it.type} />
-              <div className="grow pw-item-text"><div className="small bold ellipsis">{it.name}{it.favorite && <Star size={11} className="pw-fav-mark" aria-label={t('Favourite')} />}</div><div className="tiny muted ellipsis">{it.username || it.host || it.notesPreview || (it.cardLast4 ? `•••• ${it.cardLast4}` : '') || t(TYPE_LABEL[it.type] || 'Login')}</div></div>
+              <div className="grow pw-item-text"><div className="small bold row-tight pw-item-name"><span className="ellipsis">{it.name}</span>{it.favorite && <Star size={11} className="pw-fav-mark" aria-label={t('Favourite')} />}</div><div className="tiny muted ellipsis">{it.username || it.host || it.notesPreview || (it.cardLast4 ? `•••• ${it.cardLast4}` : '') || t(TYPE_LABEL[it.type] || 'Login')}</div></div>
               <div className="pw-item-tags">{it.hasTotp && <span className="pw-chip" title={t('2FA code saved')}>2FA</span>}{it.passkeyCount > 0 && <Fingerprint size={13} aria-label={t('Passkey')} />}{it.attachmentCount > 0 && <Paperclip size={13} aria-label={t('Attachments')} />}<StrengthDot score={it.pwScore} /></div>
-              {nav === 'trash' && <Btn className="xs" onClick={async (e) => { e.stopPropagation(); await post(`/pw/${v.id}/items/${it.id}/restore`); load(); }}>Restore</Btn>}
+              {nav === 'trash' && <Btn className="xs" onClick={async (e) => { e.stopPropagation(); try { await post(`/pw/${v.id}/items/${it.id}/restore`); toast.success(t('Restored')); } catch (er) { toast.error(er.message); } load(); }}>Restore</Btn>}
             </div>
           ))}
         </div>

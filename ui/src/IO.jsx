@@ -25,7 +25,8 @@ const readFile = (file) => new Promise((ok, fail) => {
 });
 
 async function download(v, body) {
-  const res = await fetch(`/api/pw/${v.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  // Netz weg / Hostwerk beendet: Meldung statt eines Knopfs, der für immer „lädt“
+  let res; try { res = await fetch(`/api/pw/${v.id}/export`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); } catch (e) { toast.error(e.message); return; }
   if (!res.ok) { let msg = `${res.status}`; try { msg = (await res.json()).error; } catch { /* leer */ } toast.error(msg); return; }
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement('a'); a.href = url;
@@ -33,6 +34,19 @@ async function download(v, body) {
   a.download = m ? decodeURIComponent(m[1]) : 'export'; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
   toast.success(t('Export saved – it is in your downloads folder.'));
+}
+
+/**
+ * Erneut bestätigen, bevor ein Export alle Passwörter herausgibt: Master-Passwort (Hostwerk-Tresor, Anbieter mit
+ * gespeichertem Passwort) – sonst den Namen des Tresors eintippen. null = abgebrochen.
+ */
+async function askAuth(v) {
+  if (v.exportAuth === 'name') {
+    const name = await promptDialog({ title: t('Confirm the export'), text: t('An export contains every password. To confirm, type the name of the vault: {name}', { name: v.name }), label: t('Name of the vault'), confirm: t('Continue') });
+    return name ? { confirm: name } : null;
+  }
+  const master = await promptDialog({ title: t('Master password'), text: t('An export contains every password. Enter the master password of “{name}” again to continue.', { name: v.name }), label: t('Master password'), password: true, confirm: t('Continue') });
+  return master ? { master } : null;
 }
 
 export function ImportExport({ v, data, onDone }) {
@@ -66,13 +80,15 @@ export function ImportExport({ v, data, onDone }) {
     if (!pw) return;
     const again = await promptDialog({ title: t('Repeat the password'), label: t('Password'), password: true, confirm: t('Export') });
     if (again !== pw) { toast.error(t('The passwords do not match.')); return; }
-    setBusy(kind); await download(v, { kind, password: pw }); setBusy(null);
+    const auth = await askAuth(v); if (!auth) return;
+    setBusy(kind); await download(v, { kind, password: pw, ...auth }); setBusy(null);
   };
   const exportPlain = async (kind, label) => {
     const r = await confirmDialog({ title: t('Export without encryption?'), text: t('The file “{label}” contains every password in plain text. Anyone who gets it can read everything. Only use it to move to another manager right away, and delete it afterwards (also from the recycle bin).', { label: t(label) }), confirm: t('Export unencrypted'), danger: true, checkbox: { label: t('I understand – the file is not protected'), checked: false } });
     if (!r || !r.ok) return;
     if (!r.checked) { toast.error(t('Please tick the box first.')); return; }
-    setBusy(kind); await download(v, { kind, plain: true }); setBusy(null);
+    const auth = await askAuth(v); if (!auth) return;
+    setBusy(kind); await download(v, { kind, plain: true, ...auth }); setBusy(null);
   };
   const cat = (data.catalog && data.catalog.providers) || [];
   const needMap = preview && (preview.needsMapping || preview.format === 'generic' || preview.format === 'mapped');
