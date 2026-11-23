@@ -1,3 +1,10 @@
+## 2.4.0
+
+- Exports (encrypted or plain) ask for the master password again first – or the vault name for providers without a stored password; wrong master passwords slow down each further try (up to 5 s) and are logged after 5 in a row. / Exporte (verschlüsselt oder Klartext) fragen vorher erneut nach dem Master-Passwort – bzw. dem Tresornamen bei Anbietern ohne gespeichertes Passwort; falsche Master-Passwörter bremsen jeden weiteren Versuch (bis 5 s) und kommen nach 5 Fehlversuchen ins Protokoll.
+- New setting “Lock when the PC sleeps” (on by default); copying shows a countdown until the clipboard is cleared, and clearing is caught up when the window gets focus back. / Neue Einstellung „Sperren, wenn der PC schläft“ (standardmäßig an); beim Kopieren läuft ein Countdown bis zum Leeren der Zwischenablage, und das Leeren wird nachgeholt, sobald das Fenster wieder den Fokus hat.
+- Fixes: logins no longer match unrelated sites on the same shared domain (evil.co.uk / bank.co.uk, *.github.io), a too short master password no longer leaves a broken vault behind, emptying the trash asks first, tags keep their comma while typing. / Korrekturen: Zugänge passen nicht mehr zu fremden Seiten derselben geteilten Domain (evil.co.uk / bank.co.uk, *.github.io), ein zu kurzes Master-Passwort hinterlässt keinen kaputten Tresor mehr, Papierkorb leeren fragt nach, Schlagwörter behalten beim Tippen ihr Komma.
+- Layout at 1024 px next to Hostwerk’s sidebar (list or item), long vault names on one line, missing German texts, error messages instead of silent failures. / Darstellung bei 1024 px neben Hostwerks Seitenleiste (Liste oder Eintrag), lange Tresornamen in einer Zeile, fehlende deutsche Texte, Fehlermeldungen statt stillem Scheitern.
+
 ## 2.3.1
 
 - New animated icon and banner in the common Hostwerk style (isometric block). / Neues animiertes Symbol und Banner im gemeinsamen Hostwerk-Stil (isometrischer Block).
